@@ -4,7 +4,7 @@ from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
 
-from backend.file_system import get_directory_tree, create_robot_structure
+from backend.file_system import get_directory_tree, create_robot_structure, delete_file, swap_reference_file
 from backend.websocket_manager import manager
 from backend.config import BASE_DIR, DEFAULT_ROBOTS, ROOT_PATH
 import math
@@ -20,6 +20,9 @@ class FilePathReq(BaseModel):
 
 class FileDataReq(BaseModel):
     path: str
+
+class RobotInfoReq(BaseModel):
+    robot_name: str
 
 @router.get("/api/robots")
 def get_robots_tree():
@@ -111,3 +114,65 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+class FileActionReq(BaseModel):
+    path: str
+
+@router.post("/api/file/delete")
+def api_delete_file(req: FileActionReq):
+    success, error = delete_file(req.path)
+    if not success:
+        raise HTTPException(status_code=400, detail=error)
+    return {"message": "Plik usunięto pomyślnie."}
+
+@router.post("/api/file/set-reference")
+def api_set_reference(req: FileActionReq):
+    success, error = swap_reference_file(req.path)
+    if not success:
+        raise HTTPException(status_code=400, detail=error)
+    return {"message": "Zamieniono plik referencyjny."}
+
+@router.post("/api/robot-info")
+def get_robot_info(req: RobotInfoReq):
+    # Ścieżka do wybranego robota (np. Roboty/Robot_1)
+    robot_path = os.path.join(ROOT_PATH, BASE_DIR, req.robot_name)
+    if not os.path.exists(robot_path):
+        raise HTTPException(status_code=404, detail="Robot nie istnieje.")
+    
+    # Szukamy folderu referencyjnego
+    ref_dir = os.path.join(robot_path, "Przebieg_referencyjny")
+    ref_file_info = None
+    
+    if os.path.exists(ref_dir):
+        # Pobieramy pierwszy plik z folderu
+        files = [f for f in os.listdir(ref_dir) if os.path.isfile(os.path.join(ref_dir, f))]
+        if files:
+            ref_file_name = files[0]
+            ref_file_path = os.path.join(ref_dir, ref_file_name)
+            
+            try:
+                # 1. Data dodania (modyfikacji)
+                m_time = os.path.getmtime(ref_file_path)
+                record_date = datetime.fromtimestamp(m_time).strftime('%Y-%m-%d %H:%M:%S')
+                duration = None
+                
+                # 2. Czas trwania z Pandas (jeśli plik jest poprawnym CSV)
+                try:
+                    df = pd.read_csv(ref_file_path)
+                    if 'Time' in df.columns:
+                        duration = float(df['Time'].iloc[-1] - df['Time'].iloc[0]) / 1000.0
+                except Exception:
+                    pass # Zignoruj błąd z Pandas, zwrócimy chociaż datę
+                    
+                ref_file_info = {
+                    "name": ref_file_name,
+                    "record_date": record_date,
+                    "duration": duration
+                }
+            except Exception:
+                pass
+                
+    return {
+        "robot_name": req.robot_name,
+        "ref_file_info": ref_file_info
+    }
