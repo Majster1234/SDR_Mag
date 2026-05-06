@@ -58,7 +58,7 @@ const TreeNode = ({
   // Plik (tutaj dodajemy onContextMenu!)
   return (
     <div 
-      onClick={() => isPreviewMode && onFileSelect(node.path)}
+      onClick={() => (isPreviewMode || isAnalysisMode) && onFileSelect(node.path)}
       onContextMenu={(e) => {
         e.preventDefault(); // Blokujemy standardowe menu Windows/Przeglądarki
         onContextMenu(e, node.path);
@@ -71,7 +71,7 @@ const TreeNode = ({
         padding: '2px 5px', borderRadius: '4px', display: 'inline-block',
         transition: 'all 0.2s ease',
         boxShadow: isSelected ? '0 0 8px rgba(255, 235, 59, 0.5)' : (isExactlyHighlighted ? '0 0 12px rgba(76, 175, 80, 0.6)' : 'none'),
-        cursor: isPreviewMode ? 'pointer' : 'context-menu'
+        cursor: (isPreviewMode || isAnalysisMode) ? 'pointer' : 'context-menu'
       }}
     >
       📄 {node.name} {isExactlyHighlighted && '✨ Nowy!'}

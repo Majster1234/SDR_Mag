@@ -8,7 +8,8 @@ from backend.file_system import get_directory_tree, create_robot_structure, dele
 from backend.websocket_manager import manager
 from backend.config import BASE_DIR, DEFAULT_ROBOTS, ROOT_PATH
 import math
-
+import json
+from typing import Dict, Any 
 
 router = APIRouter()
 
@@ -23,6 +24,36 @@ class FileDataReq(BaseModel):
 
 class RobotInfoReq(BaseModel):
     robot_name: str
+
+CONFIG_FILE = os.path.join(ROOT_PATH, "robots_config.json")
+
+def load_robot_configs():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_robot_configs(data):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+@router.get("/api/robot-config/{robot_name}")
+def get_robot_config(robot_name: str):
+    configs = load_robot_configs()
+    return configs.get(robot_name, {"description": "", "model": "", "location": ""})
+
+@router.post("/api/robot-config/{robot_name}")
+def update_robot_config(robot_name: str, config: Dict[str, Any]):
+    configs = load_robot_configs()
+    if robot_name not in configs:
+        configs[robot_name] = {}
+    
+    configs[robot_name].update(config)
+    save_robot_configs(configs)
+    return {"message": "Zapisano pomyślnie"}
 
 @router.get("/api/robots")
 def get_robots_tree():
@@ -172,7 +203,11 @@ def get_robot_info(req: RobotInfoReq):
             except Exception:
                 pass
                 
+    configs = load_robot_configs()
+    robot_config = configs.get(req.robot_name, {})
+    
     return {
         "robot_name": req.robot_name,
-        "ref_file_info": ref_file_info
+        "ref_file_info": ref_file_info,
+        "config": robot_config  # <-- Zwracamy to do Frontendu!
     }

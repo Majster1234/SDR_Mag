@@ -1,0 +1,12 @@
+{
+    "Robot_2": {
+        "description": "Robot testowy numer 2",
+        "model": "KUKA KR120",
+        "location": "Salka szkoleniowa"
+    },
+    "Robot_1": {
+        "description": "Robot testowy numer 1",
+        "model": "KUKA KR 120",
+        "location": "Salka testowa H2"
+    }
+}
