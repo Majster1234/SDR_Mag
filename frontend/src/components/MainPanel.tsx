@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea } from 'recharts';
+import { LineChart, ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea } from 'recharts';
 import { Notifications, type NotificationItem } from './Notifications';
 
 // --- POMOCNICZE FUNKCJE ---
@@ -11,21 +11,32 @@ const getUnit = (colName: string) => {
 
 // Funkcja generująca kolor gradientowy (Zielony -> Żółty -> Czerwony)
 const getErrorColor = (val: number, max: number) => {
-  // Zabezpieczenie przed dzieleniem przez bardzo małe liczby
   if (max === 0) return 'hsl(120, 80%, 45%)';
   const ratio = Math.min(Math.max(val / max, 0), 1);
-  const hue = (1 - ratio) * 120; // 120 to zielony, 0 to czerwony
+  const hue = (1 - ratio) * 120; 
   return `hsl(${hue}, 80%, 45%)`;
 };
 
 const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: string | null }) => {
   const robotName = selectedFilePath ? selectedFilePath.split(/[/\\]/)[1] : '';
   
-  const [config, setConfig] = useState({ description: '', model: '', location: '' });
+  const [config, setConfig] = useState({ 
+    description: '', model: '', location: '',
+    is_diagnosed: false,
+    diagnosis_type: 'Odchylenia', 
+    a_deadband_threshold: 0.1,
+    cur_deadband_threshold: 0.5,
+    a_deviation_threshold: 2,
+    cur_deviation_threshold: 10,
+    a_offset_threshold: 0.1,
+    cur_offset_threshold: 2.0,
+    selected_metric: 'MAE', 
+    metric_threshold: 10
+  });
+
   const [isSaving, setIsSaving] = useState(false);
   const [status, setStatus] = useState<{type: 'success' | 'error' | '', msg: string}>({type: '', msg: ''});
 
-  // Pobieranie danych przy wejściu
   useEffect(() => {
     if (!robotName) return;
     setStatus({type: '', msg: ''});
@@ -34,18 +45,14 @@ const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: string | n
         const res = await fetch(`http://127.0.0.1:8000/api/robot-config/${robotName}`);
         if (res.ok) {
           const data = await res.json();
-          setConfig({
-            description: data.description || '',
-            model: data.model || '',
-            location: data.location || ''
-          });
+          setConfig(prev => ({ ...prev, ...data }));
         }
       } catch (e) { console.error(e); }
     };
     fetchConfig();
   }, [robotName]);
 
-  const handleChange = (field: string, value: string) => {
+  const handleChange = (field: string, value: any) => {
     setConfig(prev => ({ ...prev, [field]: value }));
   };
 
@@ -56,61 +63,131 @@ const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: string | n
       const res = await fetch(`http://127.0.0.1:8000/api/robot-config/${robotName}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config) // Wysyłamy cały słownik, API zje każdy parametr!
+        body: JSON.stringify(config)
       });
       if (res.ok) {
         setStatus({type: 'success', msg: 'Zapisano pomyślnie!'});
         setTimeout(() => setStatus({type: '', msg: ''}), 3000);
-      } else {
-        setStatus({type: 'error', msg: 'Błąd podczas zapisu.'});
       }
     } catch (e) {
-      setStatus({type: 'error', msg: 'Brak połączenia z serwerem.'});
+      setStatus({type: 'error', msg: 'Błąd połączenia.'});
     }
     setIsSaving(false);
   };
 
-  return (
-    <div style={{ textAlign: 'left' }}>
-      <h2 style={{ color: '#4caf50' }}>⚙️ Konfiguracja robota</h2>
-      
-      {robotName ? (
-        <div style={{ marginTop: '1.5rem', padding: '1.5rem', border: '1px solid #444', borderRadius: '8px', backgroundColor: '#1a1a1a', maxWidth: '600px' }}>
-          <h3 style={{ color: '#4caf50', marginTop: 0, borderBottom: '1px solid #333', paddingBottom: '0.5rem' }}>
-            Parametry dla: {robotName}
-          </h3>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '1.5rem' }}>
-            <div>
-              <label style={{ display: 'block', color: '#aaa', marginBottom: '5px' }}>Opis robota</label>
-              <input type="text" value={config.description} onChange={e => handleChange('description', e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '4px', background: '#222', color: '#fff', border: '1px solid #444', boxSizing: 'border-box' }} placeholder="np. Robot spawalniczy linia 2" />
-            </div>
-            <div>
-              <label style={{ display: 'block', color: '#aaa', marginBottom: '5px' }}>Model</label>
-              <input type="text" value={config.model} onChange={e => handleChange('model', e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '4px', background: '#222', color: '#fff', border: '1px solid #444', boxSizing: 'border-box' }} placeholder="np. KUKA KR 210" />
-            </div>
-            <div>
-              <label style={{ display: 'block', color: '#aaa', marginBottom: '5px' }}>Lokalizacja</label>
-              <input type="text" value={config.location} onChange={e => handleChange('location', e.target.value)} style={{ width: '100%', padding: '10px', borderRadius: '4px', background: '#222', color: '#fff', border: '1px solid #444', boxSizing: 'border-box' }} placeholder="np. Hala B, sektor 4" />
-            </div>
-            
-            <button onClick={handleSave} disabled={isSaving} style={{ marginTop: '10px', padding: '10px 20px', background: '#4caf50', color: 'white', border: 'none', borderRadius: '4px', cursor: isSaving ? 'not-allowed' : 'pointer', fontWeight: 'bold', alignSelf: 'flex-start' }}>
-              {isSaving ? 'Zapisywanie...' : '💾 Zapisz konfigurację'}
-            </button>
+  if (!robotName) {
+    return (
+      <div style={{ marginTop: '2rem', padding: '3rem', border: '2px dashed #444', borderRadius: '8px', color: '#aaa', textAlign: 'center' }}>
+        <span style={{ fontSize: '2rem' }}>👈</span><br/><br/>
+        Wybierz robota z drzewka, aby edytować konfigurację.
+      </div>
+    );
+  }
 
-            {status.msg && (
-              <p style={{ color: status.type === 'success' ? '#4caf50' : '#f44336', margin: '5px 0 0 0', fontWeight: 'bold' }}>
-                {status.msg}
-              </p>
-            )}
+  return (
+    <div style={{ textAlign: 'left', maxWidth: '800px' }}>
+      <h2 style={{ color: '#4caf50' }}>⚙️ Konfiguracja robota: {robotName}</h2>
+      
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '1.5rem', padding: '1.5rem', backgroundColor: '#1a1a1a', borderRadius: '8px', border: '1px solid #444' }}>
+        
+        <section>
+          <h4 style={{ color: '#aaa', marginBottom: '10px', borderBottom: '1px solid #333' }}>Dane podstawowe</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', color: '#888' }}>Model</label>
+              <input type="text" value={config.model} onChange={e => handleChange('model', e.target.value)} style={{ width: '100%', padding: '8px', background: '#222', color: '#fff', border: '1px solid #444', borderRadius: '4px' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', color: '#888' }}>Lokalizacja</label>
+              <input type="text" value={config.location} onChange={e => handleChange('location', e.target.value)} style={{ width: '100%', padding: '8px', background: '#222', color: '#fff', border: '1px solid #444', borderRadius: '4px' }} />
+            </div>
           </div>
+          <div style={{ marginTop: '10px' }}>
+            <label style={{ display: 'block', fontSize: '0.85rem', color: '#888' }}>Opis</label>
+            <textarea value={config.description} onChange={e => handleChange('description', e.target.value)} style={{ width: '100%', padding: '8px', background: '#222', color: '#fff', border: '1px solid #444', borderRadius: '4px', height: '60px' }} />
+          </div>
+        </section>
+
+        <section style={{ backgroundColor: '#222', padding: '1rem', borderRadius: '6px' }}>
+          <h4 style={{ color: '#00bcd4', marginTop: 0, marginBottom: '15px' }}>🛠️ Parametry diagnostyki</h4>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px' }}>
+            <input type="checkbox" checked={config.is_diagnosed} onChange={e => handleChange('is_diagnosed', e.target.checked)} style={{ width: '18px', height: '18px', cursor: 'pointer' }} />
+            <label style={{ color: '#fff', fontWeight: 'bold', cursor: 'pointer' }}>Robot podlega automatycznej diagnozie</label>
+          </div>
+
+          {config.is_diagnosed && (
+            <div style={{ paddingLeft: '28px', display: 'flex', flexDirection: 'column', gap: '15px', borderLeft: '2px solid #333' }}>
+              <div>
+                <label style={{ color: '#aaa', fontSize: '0.9rem', marginRight: '10px' }}>Typ diagnozy:</label>
+                <select value={config.diagnosis_type} onChange={e => handleChange('diagnosis_type', e.target.value)} style={{ padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '4px' }}>
+                  <option value="Odchylenia">Odchylenie (procentowe)</option>
+                  <option value="Odchylenie (offsetowe)">Odchylenie (offsetowe)</option>
+                  <option value="Wskaźniki">Wskaźniki matematyczne</option>
+                </select>
+              </div>
+
+              <div style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                {config.diagnosis_type === 'Odchylenia' && (
+                  <>
+                    <div>
+                      <label style={{ display: 'block', color: '#888', fontSize: '0.8rem' }}>Tolerancja Osie (A) [%]</label>
+                      <input type="number" value={config.a_deviation_threshold} onChange={e => handleChange('a_deviation_threshold', Number(e.target.value))} style={{ width: '100%', padding: '8px', background: '#333', color: '#fff', border: '1px solid #555' }} />
+                      
+                      <label style={{ display: 'block', color: '#888', fontSize: '0.8rem', marginTop: '10px' }}>Strefa martwa Osie (A) [°]</label>
+                      <input type="number" step="0.01" value={config.a_deadband_threshold} onChange={e => handleChange('a_deadband_threshold', Number(e.target.value))} style={{ width: '100%', padding: '8px', background: '#333', color: '#fff', border: '1px solid #555' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: '#888', fontSize: '0.8rem' }}>Tolerancja Prądy (Cur) [%]</label>
+                      <input type="number" value={config.cur_deviation_threshold} onChange={e => handleChange('cur_deviation_threshold', Number(e.target.value))} style={{ width: '100%', padding: '8px', background: '#333', color: '#fff', border: '1px solid #555' }} />
+                      
+                      <label style={{ display: 'block', color: '#888', fontSize: '0.8rem', marginTop: '10px' }}>Strefa martwa Prądy (Cur) [%]</label>
+                      <input type="number" step="0.1" value={config.cur_deadband_threshold} onChange={e => handleChange('cur_deadband_threshold', Number(e.target.value))} style={{ width: '100%', padding: '8px', background: '#333', color: '#fff', border: '1px solid #555' }} />
+                    </div>
+                  </>
+                )}
+
+                {config.diagnosis_type === 'Odchylenie (offsetowe)' && (
+                  <>
+                    <div>
+                      <label style={{ display: 'block', color: '#888', fontSize: '0.8rem' }}>Offset Osie (A) [°]</label>
+                      <input type="number" step="0.01" value={config.a_offset_threshold} onChange={e => handleChange('a_offset_threshold', Number(e.target.value))} style={{ width: '100%', padding: '8px', background: '#333', color: '#fff', border: '1px solid #555' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', color: '#888', fontSize: '0.8rem' }}>Offset Prądy (Cur) [%]</label>
+                      <input type="number" step="0.1" value={config.cur_offset_threshold} onChange={e => handleChange('cur_offset_threshold', Number(e.target.value))} style={{ width: '100%', padding: '8px', background: '#333', color: '#fff', border: '1px solid #555' }} />
+                    </div>
+                  </>
+                )}
+              </div>
+              {config.diagnosis_type === 'Wskaźniki' && (
+                <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
+                  <div>
+                    <label style={{ color: '#aaa', fontSize: '0.9rem' }}>Wskaźnik:</label>
+                    <select value={config.selected_metric} onChange={e => handleChange('selected_metric', e.target.value)} style={{ marginLeft: '10px', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '4px' }}>
+                      <option value="IAE">IAE (Integral Absolute Error)</option>
+                      <option value="ISE">ISE (Integral Square Error)</option>
+                      <option value="MAE">MAE (Mean Absolute Error)</option>
+                      <option value="MSE">MSE (Mean Square Error)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ color: '#aaa', fontSize: '0.9rem' }}>Dopuszczalny błąd (%):</label>
+                    <input type="number" value={config.metric_threshold} onChange={e => handleChange('metric_threshold', Number(e.target.value))} style={{ width: '80px', marginLeft: '10px', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '4px' }} />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          <button onClick={handleSave} disabled={isSaving} style={{ padding: '10px 25px', background: '#4caf50', color: 'white', border: 'none', borderRadius: '4px', cursor: isSaving ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}>
+            {isSaving ? 'Zapisywanie...' : '💾 Zapisz konfigurację'}
+          </button>
+          {status.msg && <span style={{ color: status.type === 'success' ? '#4caf50' : '#f44336', fontWeight: 'bold' }}>{status.msg}</span>}
         </div>
-      ) : (
-        <div style={{ marginTop: '2rem', padding: '3rem', border: '2px dashed #444', borderRadius: '8px', color: '#aaa', textAlign: 'center' }}>
-          <span style={{ fontSize: '2rem' }}>👈</span><br/><br/>
-          Wybierz robota z drzewka po lewej stronie, aby edytować jego konfigurację.
-        </div>
-      )}
+      </div>
     </div>
   );
 };
@@ -333,7 +410,7 @@ const PodgladDanych = ({ selectedFilePath }: { selectedFilePath: string | null }
       ) : (
         <div style={{ marginTop: '2rem', padding: '3rem', border: '2px dashed #444', borderRadius: '8px', color: '#aaa', textAlign: 'center' }}>
           <span style={{ fontSize: '2rem' }}>👈</span><br/><br/>
-          Wybierz plik z drzewka po lewej stronie, aby rozpocząć analizę.
+          Wybierz plik z drzewka po lewej stronie, aby rozpocząć.
         </div>
       )}
     </div>
@@ -344,6 +421,55 @@ const PodgladDanych = ({ selectedFilePath }: { selectedFilePath: string | null }
 type Metric = 'MAE' | 'IAE' | 'ISE';
 const METRICS: Metric[] = ['MAE', 'IAE', 'ISE'];
 
+const MiniAnalizaChart = ({ title, data, unit }: { title: string, data: any[], unit: string }) => {
+  // Wyliczamy w locie strefy alarmowe, żeby na małym wykresie też świeciło na czerwono!
+  const violationAreas = useMemo(() => {
+    if (!data || data.length === 0) return [];
+    const areas: { start: number, end: number }[] = [];
+    let violationStart: number | null = null;
+    for (let i = 0; i < data.length; i++) {
+      const d = data[i];
+      const isOut = d.Badany !== null && d.UpperLimit !== null && d.LowerLimit !== null && 
+                    (d.Badany > d.UpperLimit || d.Badany < d.LowerLimit);
+      if (isOut && violationStart === null) violationStart = d.Time;
+      else if (!isOut && violationStart !== null) {
+        areas.push({ start: violationStart, end: d.Time });
+        violationStart = null;
+      }
+    }
+    if (violationStart !== null) areas.push({ start: violationStart, end: data[data.length - 1].Time });
+    return areas;
+  }, [data]);
+
+  return (
+    <div style={{ background: '#111', padding: '10px', borderRadius: '8px', border: '1px solid #333', marginBottom: '10px' }}>
+      <h5 style={{ margin: '0 0 10px 0', color: '#aaa', fontSize: '0.8rem' }}>{title} [{unit}]</h5>
+      <div style={{ height: '120px' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data}>
+            <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
+            <XAxis dataKey="Time" hide />
+            <YAxis domain={['auto', 'auto']} hide />
+            <Tooltip 
+              contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#444' }} 
+              formatter={(v: any) => [Number(v).toFixed(2), '']}
+            />
+            
+            {violationAreas.map((area, idx) => (
+              <ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />
+            ))}
+
+            <Line dataKey="UpperLimit" stroke="#9e9e9e" strokeDasharray="3 3" dot={false} strokeOpacity={0.4} isAnimationActive={false} />
+            <Line dataKey="LowerLimit" stroke="#9e9e9e" strokeDasharray="3 3" dot={false} strokeOpacity={0.4} isAnimationActive={false} />
+            <Line dataKey="Referencja" stroke="#4caf50" strokeWidth={1} dot={false} isAnimationActive={false} />
+            <Line dataKey="Badany" stroke="#ffeb3b" strokeWidth={1} dot={false} isAnimationActive={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+};
+
 const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | null }) => {
   const [robotInfo, setRobotInfo] = useState<any>(null);
   const [refData, setRefData] = useState<any[]>([]);
@@ -351,7 +477,7 @@ const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | nu
   const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [selectedColumn, setSelectedColumn] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
-
+  const [viewMode, setViewMode] = useState<'detailed' | 'overview'>('detailed');
   const [refAreaLeft, setRefAreaLeft] = useState<number | null>(null);
   const [refAreaRight, setRefAreaRight] = useState<number | null>(null);
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
@@ -408,26 +534,56 @@ const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | nu
     fetchTest();
   }, [selectedFilePath, isFile]);
 
-  // Obliczanie połączonych danych do wykresów
-  const combinedData = useMemo(() => {
-    if (!selectedColumn || refData.length === 0 || testData.length === 0) return [];
-    const result = [];
+  // Funkcja pomocnicza do generowania danych z tolerancją dla DOWOLNEJ kolumny
+  const prepareColumnData = (colName: string) => {
+    if (!colName || refData.length === 0 || testData.length === 0) return [];
+    
     const maxLen = Math.max(refData.length, testData.length);
+    const config = robotInfo?.config || {};
+    const isA = colName.startsWith('A');
+    
+    const devThr = isA ? (config.a_deviation_threshold || 0) : (config.cur_deviation_threshold || 0);
+    const offThr = isA ? (config.a_offset_threshold || 0) : (config.cur_offset_threshold || 0);
+    const deadbandThr = isA ? (config.a_deadband_threshold || 0.05) : (config.cur_deadband_threshold || 0.5);
+    const diagType = config.diagnosis_type || 'Odchylenia';
+    const windowSize = 5; 
+
+    const result = [];
     for(let i = 0; i < maxLen; i++) {
        const r = refData[i] || {};
        const t = testData[i] || {};
        const time = r.Time !== undefined ? r.Time : (t.Time !== undefined ? t.Time : i);
-       const rVal = r[selectedColumn] !== undefined ? r[selectedColumn] : null;
-       const tVal = t[selectedColumn] !== undefined ? t[selectedColumn] : null;
-       result.push({
-           Time: time,
-           Referencja: rVal,
-           Badany: tVal,
-           Roznica: (rVal !== null && tVal !== null) ? Number((tVal - rVal).toFixed(4)) : null
-       });
+       const rVal = r[colName] ?? null;
+       const tVal = t[colName] ?? null;
+
+       let upper = null;
+       let lower = null;
+
+       if (rVal !== null) {
+         if (diagType === 'Odchylenia') {
+           let localMax = 0;
+           const startIdx = Math.max(0, i - windowSize);
+           const endIdx = Math.min(refData.length - 1, i + windowSize);
+           for (let j = startIdx; j <= endIdx; j++) {
+             const val = Math.abs(refData[j]?.[colName] || 0);
+             if (val > localMax) localMax = val;
+           }
+           const margin = Math.max(localMax * (devThr / 100), deadbandThr);
+           upper = rVal + margin;
+           lower = rVal - margin;
+         } else if (diagType === 'Odchylenie (offsetowe)') {
+           upper = rVal + offThr;
+           lower = rVal - offThr;
+         }
+       }
+
+       result.push({ Time: time, Referencja: rVal, Badany: tVal, UpperLimit: upper, LowerLimit: lower, Roznica: (rVal !== null && tVal !== null) ? Number((tVal - rVal).toFixed(4)) : null });
     }
     return result;
-  }, [refData, testData, selectedColumn]);
+  };
+
+  // Używamy funkcji pomocniczej dla aktualnie wybranej kolumny w widoku szczegółowym
+  const combinedData = useMemo(() => prepareColumnData(selectedColumn), [refData, testData, selectedColumn, robotInfo]);
 
   // --- OBLICZANIE TABELI STATYSTYK (MAE, IAE, ISE) ---
   const statsData = useMemo(() => {
@@ -448,18 +604,15 @@ const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | nu
         const t = testData[i]?.[col];
         if (r !== undefined && r !== null && t !== undefined && t !== null) {
           const err = t - r;
-          
           sumAbs += Math.abs(err);
           count++;
 
-          // Wyliczanie delty czasu (dt) do całek
           let dt = 0;
           if (i > 0) {
             const timePrev = refData[i - 1]?.Time ?? (i - 1);
             const timeCurr = refData[i]?.Time ?? i;
             dt = timeCurr - timePrev;
           }
-          
           integralAbs += Math.abs(err) * dt;
           integralSqr += (err * err) * dt;
         }
@@ -473,57 +626,86 @@ const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | nu
     const aCols = availableColumns.filter(c => c.startsWith('A')).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
     const curCols = availableColumns.filter(c => c.startsWith('Cur')).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
-    // Wyliczanie osobnych maksymalnych wartości dla gradientu (Dla osi A i Prądów Cur)
     const maxes = {
-      A: {
-        MAE: Math.max(...aCols.map(c => errors.MAE[c]), 0.0001),
-        IAE: Math.max(...aCols.map(c => errors.IAE[c]), 0.0001),
-        ISE: Math.max(...aCols.map(c => errors.ISE[c]), 0.0001),
-      },
-      Cur: {
-        MAE: Math.max(...curCols.map(c => errors.MAE[c]), 0.0001),
-        IAE: Math.max(...curCols.map(c => errors.IAE[c]), 0.0001),
-        ISE: Math.max(...curCols.map(c => errors.ISE[c]), 0.0001),
-      }
+      A: { MAE: Math.max(...aCols.map(c => errors.MAE[c]), 0.0001), IAE: Math.max(...aCols.map(c => errors.IAE[c]), 0.0001), ISE: Math.max(...aCols.map(c => errors.ISE[c]), 0.0001) },
+      Cur: { MAE: Math.max(...curCols.map(c => errors.MAE[c]), 0.0001), IAE: Math.max(...curCols.map(c => errors.IAE[c]), 0.0001), ISE: Math.max(...curCols.map(c => errors.ISE[c]), 0.0001) }
     };
 
     return { errors, aCols, curCols, maxes };
   }, [refData, testData, availableColumns]);
 
-  const displayedData = zoomRange 
-    ? combinedData.filter(d => d.Time >= zoomRange[0] && d.Time <= zoomRange[1])
-    : combinedData;
+  const displayedData = zoomRange ? combinedData.filter(d => d.Time >= zoomRange[0] && d.Time <= zoomRange[1]) : combinedData;
+
+  // --- OBLICZANIE STREF ALARMOWYCH DLA GŁÓWNEGO WYKRESU ---
+  const violationAreas = useMemo(() => {
+    if (!displayedData || displayedData.length === 0) return [];
+    const areas: { start: number, end: number }[] = [];
+    let violationStart: number | null = null;
+
+    for (let i = 0; i < displayedData.length; i++) {
+      const d = displayedData[i];
+      const isOut = d.Badany !== null && d.UpperLimit !== null && d.LowerLimit !== null && 
+                    (d.Badany > d.UpperLimit || d.Badany < d.LowerLimit);
+      
+      if (isOut && violationStart === null) {
+        violationStart = d.Time;
+      } else if (!isOut && violationStart !== null) {
+        areas.push({ start: violationStart, end: d.Time });
+        violationStart = null;
+      }
+    }
+    
+    if (violationStart !== null) {
+      areas.push({ start: violationStart, end: displayedData[displayedData.length - 1].Time });
+    }
+
+    return areas;
+  }, [displayedData]);
 
   const handleZoom = () => {
     if (refAreaLeft === refAreaRight || refAreaLeft === null || refAreaRight === null) {
-      setRefAreaLeft(null);
-      setRefAreaRight(null);
-      return;
+      setRefAreaLeft(null); setRefAreaRight(null); return;
     }
     let [left, right] = [refAreaLeft, refAreaRight];
     if (left > right) [left, right] = [right, left];
     setZoomRange([left, right]);
-    setRefAreaLeft(null);
-    setRefAreaRight(null);
+    setRefAreaLeft(null); setRefAreaRight(null);
   };
 
   const unit = getUnit(selectedColumn);
 
   return (
     <div style={{ textAlign: 'left' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ color: '#e91e63' }}>📈 Analiza przebiegów</h2>
-        {zoomRange && (
-          <button onClick={() => setZoomRange(null)} style={{ padding: '6px 16px', background: '#e91e63', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
-            🔍 Resetuj Zoom
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h2 style={{ color: '#e91e63', margin: 0 }}>📈 Analiza przebiegów</h2>
+        
+        {/* KONTROLKI WIDOKU */}
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button 
+            onClick={() => setViewMode('detailed')}
+            style={{ padding: '8px 16px', background: viewMode === 'detailed' ? '#e91e63' : '#333', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            🔍 Widok szczegółowy
           </button>
-        )}
+          <button 
+            onClick={() => setViewMode('overview')}
+            style={{ padding: '8px 16px', background: viewMode === 'overview' ? '#e91e63' : '#333', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
+          >
+            📱 Widok zbiorczy (Dashboard)
+          </button>
+          {zoomRange && viewMode === 'detailed' && (
+            <button onClick={() => setZoomRange(null)} style={{ padding: '8px 16px', background: '#444', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+              Reset Zoom
+            </button>
+          )}
+        </div>
       </div>
       
       {robotName ? (
         <div style={{ marginTop: '1rem', padding: '1.5rem', border: '1px solid #444', borderRadius: '8px', backgroundColor: '#1a1a1a' }}>
+          
+          {/* HEADER Z INFORMACJAMI */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-            {/* 1. DANE ROBOTA Z KONFIGURACJI */}
             <div style={{ background: '#2a2a2a', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid #00bcd4' }}>
               <h4 style={{ margin: '0 0 5px 0', color: '#00bcd4' }}>🤖 Dane robota</h4>
               <p style={{ margin: '5px 0', color: '#aaa' }}>Model: <strong style={{ color: '#fff' }}>{robotInfo?.config?.model || '[Brak]'}</strong></p>
@@ -533,29 +715,26 @@ const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | nu
               )}
             </div>
 
-            {/* 2. PLIK REFERENCYJNY */}
             <div style={{ background: '#2a2a2a', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid #4caf50' }}>
               <h4 style={{ margin: '0 0 5px 0', color: '#4caf50' }}>🟢 Plik referencyjny</h4>
               <p style={{ margin: '0', color: '#aaa' }}>{robotInfo?.ref_file_info?.name || 'Brak pliku referencyjnego'}</p>
             </div>
 
-            {/* 3. PLIK BADANY */}
             <div style={{ background: '#2a2a2a', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid #ffeb3b' }}>
               <h4 style={{ margin: '0 0 5px 0', color: '#ffeb3b' }}>🟡 Plik badany</h4>
-              <p style={{ margin: '0', color: '#aaa' }}>{isFile ? selectedFilePath?.split(/[/\\]/).pop() : 'Wybierz plik z drzewka...'}</p>
+              <p style={{ margin: '0', color: '#aaa' }}>{isFile ? selectedFilePath?.split(/[/\\]/).pop() : 'Wybierz plik...'}</p>
             </div>
           </div>
 
           {combinedData.length > 0 && isFile && (
             <>
-              {/* NOWA KOMPAKTOWA TABELA STATYSTYCZNA (MAE, IAE, ISE) */}
+              {/* TABELA STATYSTYK (Pokazywana zawsze) */}
               {statsData && (
                 <div style={{ marginBottom: '2rem' }}>
                   <h3 style={{ color: '#00bcd4', marginBottom: '0.5rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>
                     Wskaźniki Błędów: MAE, IAE, ISE
                   </h3>
                   <div style={{ background: '#111', padding: '1rem', borderRadius: '8px', border: '1px solid #333', overflowX: 'auto' }}>
-                    
                     <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', color: '#fff', fontSize: '0.9rem' }}>
                       <thead>
                         <tr>
@@ -577,29 +756,21 @@ const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | nu
                         {METRICS.map(metric => (
                           <tr key={metric}>
                             <td style={{ padding: '8px', borderBottom: '1px solid #333', borderRight: '1px solid #444', textAlign: 'left', fontWeight: 'bold', color: '#00bcd4' }}>{metric}</td>
-                            
-                            {/* Część A (Osie Kątowe) */}
                             {statsData.aCols.map(c => {
                               const val = statsData.errors[metric][c];
                               const bgColor = getErrorColor(val, statsData.maxes.A[metric]);
                               return (
                                 <td key={c} style={{ padding: '8px', borderBottom: '1px solid #333', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #444' : 'none' }}>
-                                  <div style={{ background: '#222', borderBottom: `4px solid ${bgColor}`, padding: '4px', borderRadius: '4px', fontWeight: 'bold' }}>
-                                    {val.toFixed(3)}
-                                  </div>
+                                  <div style={{ background: '#222', borderBottom: `4px solid ${bgColor}`, padding: '4px', borderRadius: '4px', fontWeight: 'bold' }}>{val.toFixed(3)}</div>
                                 </td>
                               );
                             })}
-                            
-                            {/* Część Cur (Osie Prądowe) */}
                             {statsData.curCols.map(c => {
                               const val = statsData.errors[metric][c];
                               const bgColor = getErrorColor(val, statsData.maxes.Cur[metric]);
                               return (
                                 <td key={c} style={{ padding: '8px', borderBottom: '1px solid #333' }}>
-                                  <div style={{ background: '#222', borderBottom: `4px solid ${bgColor}`, padding: '4px', borderRadius: '4px', fontWeight: 'bold' }}>
-                                    {val.toFixed(3)}
-                                  </div>
+                                  <div style={{ background: '#222', borderBottom: `4px solid ${bgColor}`, padding: '4px', borderRadius: '4px', fontWeight: 'bold' }}>{val.toFixed(3)}</div>
                                 </td>
                               );
                             })}
@@ -607,64 +778,97 @@ const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | nu
                         ))}
                       </tbody>
                     </table>
-
                   </div>
                 </div>
               )}
 
-              {/* Wybór sygnału do wykresu */}
-              <div style={{ marginBottom: '1.5rem', background: '#222', padding: '10px', borderRadius: '8px', border: '1px solid #333' }}>
-                <span style={{ color: '#aaa', marginRight: '15px' }}>Sygnał do analizy szczegółowej:</span>
-                <select 
-                  value={selectedColumn} 
-                  onChange={(e) => setSelectedColumn(e.target.value)} 
-                  style={{ padding: '5px 10px', borderRadius: '4px', background: '#333', color: 'white', border: '1px solid #555', cursor: 'pointer' }}
-                >
-                  {availableColumns.map(col => (
-                    <option key={col} value={col}>{col} {getUnit(col) ? `[${getUnit(col)}]` : ''}</option>
-                  ))}
-                </select>
-              </div>
+              {/* RENDEROWANIE ZALEŻNE OD TRYBU */}
+              {viewMode === 'detailed' ? (
+                <>
+                  <div style={{ marginBottom: '1.5rem', background: '#222', padding: '10px', borderRadius: '8px', border: '1px solid #333' }}>
+                    <span style={{ color: '#aaa', marginRight: '15px' }}>Sygnał do analizy szczegółowej:</span>
+                    <select 
+                      value={selectedColumn} 
+                      onChange={(e) => setSelectedColumn(e.target.value)} 
+                      style={{ padding: '5px 10px', borderRadius: '4px', background: '#333', color: 'white', border: '1px solid #555', cursor: 'pointer' }}
+                    >
+                      {availableColumns.map(col => (
+                        <option key={col} value={col}>{col} {getUnit(col) ? `[${getUnit(col)}]` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* TYTUŁ I GŁÓWNY WYKRES */}
-              <h3 style={{ color: '#fff', marginBottom: '0.5rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>
-                Porównanie z referencją {unit ? `[${unit}]` : ''}
-              </h3>
-              <div style={{ height: '300px', background: '#111', padding: '1rem', borderRadius: '8px', border: '1px solid #333', marginBottom: '2.5rem' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={displayedData} margin={{ top: 10, right: 30, left: 10, bottom: 5 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                    <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#888" hide />
-                    <YAxis domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#444' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => [`${Number(v).toFixed(2)} ${unit}`, name]} />
-                    <Legend verticalAlign="top" height={36} />
-                    
-                    <Line name="Referencja" type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    <Line name="Badany" type="monotone" dataKey="Badany" stroke="#ffeb3b" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    
-                    {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#e91e63" fillOpacity={0.3} />}
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+                  <h3 style={{ color: '#fff', marginBottom: '0.5rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>
+                    Porównanie z referencją {unit ? `[${unit}]` : ''}
+                  </h3>
+                  <div style={{ height: '300px', background: '#111', padding: '1rem', borderRadius: '8px', border: '1px solid #333', marginBottom: '2.5rem' }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={displayedData} margin={{ top: 10, right: 30, left: 10, bottom: 5 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                        <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#888" hide />
+                        <YAxis domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
+                        <Tooltip 
+                          contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#444' }} 
+                          labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} 
+                          formatter={(v: any, name: any) => {
+                            if (Array.isArray(v)) return [`od ${v[0].toFixed(2)} do ${v[1].toFixed(2)} ${unit}`, name];
+                            return [`${Number(v).toFixed(2)} ${unit}`, name];
+                          }} 
+                        />
+                        <Legend verticalAlign="top" height={36} />
+                        
+                        {violationAreas.map((area, idx) => (
+                          <ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />
+                        ))}
 
-              {/* TYTUŁ I WYKRES RÓŻNICY */}
-              <h3 style={{ color: '#ff5722', marginBottom: '0.5rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>
-                Obliczona różnica sygnałów {unit ? `[${unit}]` : ''}
-              </h3>
-              <div style={{ height: '220px', background: '#111', padding: '1rem', borderRadius: '8px', border: '1px solid #333' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={displayedData} margin={{ top: 10, right: 30, left: 10, bottom: 20 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                    <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#888" label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#aaa' }} />
-                    <YAxis domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#444' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any) => [`${Number(v).toFixed(2)} ${unit}`, 'Δ Różnica']} />
-                    
-                    <Line name="Δ Odchylenie (Badany - Ref)" type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    
-                    {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#e91e63" fillOpacity={0.3} />}
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+                        <Line name="Górny limit" type="monotone" dataKey="UpperLimit" stroke="#9e9e9e" strokeDasharray="4 4" dot={false} isAnimationActive={false} />
+                        <Line name="Dolny limit" type="monotone" dataKey="LowerLimit" stroke="#9e9e9e" strokeDasharray="4 4" dot={false} isAnimationActive={false} />
+                        <Line name="Referencja" type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={2} dot={false} isAnimationActive={false} />
+                        <Line name="Badany" type="monotone" dataKey="Badany" stroke="#ffeb3b" strokeWidth={2} dot={false} isAnimationActive={false} />
+                        
+                        {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#e91e63" fillOpacity={0.3} />}
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <h3 style={{ color: '#ff5722', marginBottom: '0.5rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>
+                    Obliczona różnica sygnałów {unit ? `[${unit}]` : ''}
+                  </h3>
+                  <div style={{ height: '220px', background: '#111', padding: '1rem', borderRadius: '8px', border: '1px solid #333' }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={displayedData} margin={{ top: 10, right: 30, left: 10, bottom: 20 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                        <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#888" label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#aaa' }} />
+                        <YAxis domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
+                        <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#444' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any) => [`${Number(v).toFixed(2)} ${unit}`, 'Δ Różnica']} />
+                        
+                        {violationAreas.map((area, idx) => (
+                          <ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />
+                        ))}
+
+                        <Line name="Δ Odchylenie (Badany - Ref)" type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={2} dot={false} isAnimationActive={false} />
+                        {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#e91e63" fillOpacity={0.3} />}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </>
+              ) : (
+                /* WIDOK ZBIORCZY (DASHBOARD) */
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '1rem' }}>
+                  <div>
+                    <h4 style={{ color: '#00bcd4', textAlign: 'center', borderBottom: '1px solid #333', paddingBottom: '5px', marginTop: 0 }}>Osie Kątowe (A)</h4>
+                    {statsData?.aCols.map(col => (
+                      <MiniAnalizaChart key={col} title={col} data={prepareColumnData(col)} unit="°" />
+                    ))}
+                  </div>
+                  <div>
+                    <h4 style={{ color: '#ffeb3b', textAlign: 'center', borderBottom: '1px solid #333', paddingBottom: '5px', marginTop: 0 }}>Prądy Silników (Cur)</h4>
+                    {statsData?.curCols.map(col => (
+                      <MiniAnalizaChart key={col} title={col} data={prepareColumnData(col)} unit="%" />
+                    ))}
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
@@ -673,7 +877,6 @@ const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | nu
   );
 };
 
-// --- KOMPONENTY POBOCZNE I GŁÓWNY KONTENER ---
 const OstatnieOperacje = () => (
   <div style={{ textAlign: 'left', padding: '1rem' }}>
     <h2 style={{ color: '#ff9800' }}>🕒 Ostatnie operacje</h2>

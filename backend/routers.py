@@ -79,7 +79,7 @@ def get_file_info(req: FilePathReq):
         m_time = os.path.getctime(full_path)
         record_date = datetime.fromtimestamp(m_time).strftime('%Y-%m-%d %H:%M:%S')
 
-        df = pd.read_csv(full_path)
+        df = pd.read_csv(full_path, sep=None, engine='python')
         columns = df.columns.tolist()
 
         duration = None
@@ -120,7 +120,7 @@ def get_file_data(req: FileDataReq):
         raise HTTPException(status_code=404, detail="Plik nie istnieje.")
 
     try:
-        df = pd.read_csv(full_path)
+        df = pd.read_csv(full_path, sep=None, engine='python')
         
         # Opcjonalnie: upewniamy się, że nie ma pustych wartości (NaN) w pliku, 
         # bo format JSON ich nie obsługuje
@@ -189,7 +189,7 @@ def get_robot_info(req: RobotInfoReq):
                 
                 # 2. Czas trwania z Pandas (jeśli plik jest poprawnym CSV)
                 try:
-                    df = pd.read_csv(ref_file_path)
+                    df = pd.read_csv(ref_file_path, sep=None, engine='python')
                     if 'Time' in df.columns:
                         duration = float(df['Time'].iloc[-1] - df['Time'].iloc[0]) / 1000.0
                 except Exception:
