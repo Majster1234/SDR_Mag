@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
-
+import numpy as np
 from backend.file_system import get_directory_tree, create_robot_structure, delete_file, swap_reference_file
 from backend.websocket_manager import manager
 from backend.config import BASE_DIR, DEFAULT_ROBOTS, ROOT_PATH
@@ -136,6 +136,57 @@ def get_file_data(req: FileDataReq):
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class KinematicsReq(BaseModel):
+    path: str
+
+@router.post("/api/kinematics")
+def calculate_kinematics(req: KinematicsReq):
+    file_path = os.path.join(ROOT_PATH, req.path)
+    if not os.path.exists(file_path):
+        return {"error": "Plik nie istnieje"}
+
+    try:
+        # ZMIANA: Automatyczne wykrywanie separatora i łatanaie pustych wartości (NaN)
+        df = pd.read_csv(file_path, sep=None, engine='python')
+        df = df.fillna(0)
+        
+        # Filtrujemy tylko kolumny osi
+        if not all(col in df.columns for col in ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']):
+            return {"error": "Brak kompletnych danych A1-A6"}
+
+        # Definiujemy kinematykę z użyciem Numpy dla prędkości
+        d1, a1, a2, a3, d4, d6 = 0.175, 0.260, 0.480, 0.035, 0.570, 0.158
+        
+        def Tz(d): return np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, d], [0, 0, 0, 1]])
+        def Tx(a): return np.array([[1, 0, 0, a], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+        def Rz(th): return np.array([[np.cos(th), -np.sin(th), 0, 0], [np.sin(th), np.cos(th), 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+        def Ry(th): return np.array([[np.cos(th), 0, np.sin(th), 0], [0, 1, 0, 0], [-np.sin(th), 0, np.cos(th), 0], [0, 0, 0, 1]])
+        def Rx(th): return np.array([[1, 0, 0, 0], [0, np.cos(th), -np.sin(th), 0], [0, np.sin(th), np.cos(th), 0], [0, 0, 0, 1]])
+
+        T0 = np.eye(4) @ Tz(0.5)
+
+        all_points = []
+        
+        # Przeliczamy cały plik za jednym zamachem
+        for _, row in df.iterrows():
+            q = np.radians([row['A1']-90, row['A2']+90, row['A3'], row['A4'], row['A5'], row['A6']])
+            
+            T1 = T0 @ Rz(-q[0]) @ Tz(d1)
+            T2 = T1 @ Tx(a1) @ Ry(q[1])
+            T3 = T2 @ Tz(a2) @ Ry(q[2])
+            T4 = T3 @ Tx(a3) @ Tz(d4) @ Rx(q[3])
+            T5 = T4 @ Tz(0.10) @ Rx(-q[4])
+            T6 = T5 @ Rz(q[5]) @ Tx(d6)
+            
+            # Ekstrakcja pozycji (X, Y, Z) z macierzy
+            points = [T[:3, 3].tolist() for T in [T0, T1, T2, T3, T4, T5, T6]]
+            all_points.append(points)
+
+        return {"trajectory": all_points}
+
+    except Exception as e:
+        return {"error": str(e)}
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

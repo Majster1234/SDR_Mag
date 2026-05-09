@@ -15,10 +15,11 @@
         "selected_metric": "MAE",
         "metric_threshold": 10,
         "a_deviation_threshold": 2,
-        "cur_deviation_threshold": 10,
+        "cur_deviation_threshold": 5,
         "a_offset_threshold": 0.01,
         "cur_offset_threshold": 2,
         "a_deadband_threshold": 0.01,
-        "cur_deadband_threshold": 2
+        "cur_deadband_threshold": 1,
+        "max_violation_threshold": 30
     }
 }
