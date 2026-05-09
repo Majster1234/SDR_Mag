@@ -16,7 +16,11 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
     cur_offset_threshold: 2.0,
     max_violation_threshold: 30.0,
     selected_metric: 'MAE', 
-    metric_threshold: 10
+    metric_threshold: 10,
+    iae_threshold: 50,
+    ise_threshold: 50,
+    mae_threshold: 0.5,
+    mse_threshold: 1.0
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -145,37 +149,55 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
                   </>
                 )}
               </div>
-              {config.diagnosis_type === 'Wskaźniki' && (
-                <div style={{ display: 'flex', gap: '20px', alignItems: 'center' }}>
-                  <div>
-                    <label style={{ color: '#aaa', fontSize: '0.9rem' }}>Wskaźnik:</label>
-                    <select value={config.selected_metric} onChange={e => handleChange('selected_metric', e.target.value)} style={{ marginLeft: '10px', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '4px' }}>
-                      <option value="IAE">IAE (Integral Absolute Error)</option>
-                      <option value="ISE">ISE (Integral Square Error)</option>
-                      <option value="MAE">MAE (Mean Absolute Error)</option>
-                      <option value="MSE">MSE (Mean Square Error)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ color: '#aaa', fontSize: '0.9rem' }}>Dopuszczalny błąd (%):</label>
-                    <input type="number" value={config.metric_threshold} onChange={e => handleChange('metric_threshold', Number(e.target.value))} style={{ width: '80px', marginLeft: '10px', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '4px' }} />
-                  </div>
-                </div>
-              )}
-              {(config.diagnosis_type === 'Odchylenia' || config.diagnosis_type === 'Odchylenie (offsetowe)') && (
-                <div style={{ marginTop: '15px', padding: '10px', background: '#333', borderRadius: '4px' }}>
-                  <label style={{ color: '#aaa', fontSize: '0.85rem' }}>Dopuszczalny % próbek poza tolerancją (Próg awarii):</label>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '5px' }}>
+            {config.diagnosis_type === 'Wskaźniki' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                <h4 style={{ margin: '0 0 10px 0', color: '#ffeb3b', borderBottom: '1px solid #444', paddingBottom: '5px' }}>
+                Inteligentna Analiza Statystyczna
+                </h4>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                {/* MAE - Kalibracja */}
+                <div style={{ background: '#222', padding: '10px', borderRadius: '4px', borderLeft: '3px solid #00bcd4' }}>
+                    <strong style={{ color: '#00bcd4', fontSize: '0.85rem' }}>📍 Kalibracja/Offset (MAE)</strong>
                     <input 
-                      type="number" step="0.1"
-                      value={config.max_violation_threshold} 
-                      onChange={e => handleChange('max_violation_threshold', Number(e.target.value))} 
-                      style={{ width: '80px', padding: '6px', background: '#222', color: '#fff', border: '1px solid #555', borderRadius: '4px' }} 
+                    type="number" step="0.001" value={config.mae_threshold || 0.5} 
+                    onChange={e => handleChange('mae_threshold', Number(e.target.value))} 
+                    style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} 
                     />
-                    <span style={{ color: '#888', fontSize: '0.9rem' }}>% (powyżej tego progu wskaźnik będzie czerwony)</span>
-                  </div>
                 </div>
-              )}
+
+                {/* MSE - Drgania */}
+                <div style={{ background: '#222', padding: '10px', borderRadius: '4px', borderLeft: '3px solid #9c27b0' }}>
+                    <strong style={{ color: '#9c27b0', fontSize: '0.85rem' }}>📳 Drgania/Oscylacje (MSE)</strong>
+                    <input 
+                    type="number" step="0.001" value={config.mse_threshold || 1.0} 
+                    onChange={e => handleChange('mse_threshold', Number(e.target.value))} 
+                    style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} 
+                    />
+                </div>
+
+                {/* IAE - Zużycie */}
+                <div style={{ background: '#222', padding: '10px', borderRadius: '4px', borderLeft: '3px solid #ff9800' }}>
+                    <strong style={{ color: '#ff9800', fontSize: '0.85rem' }}>⚙️ Zużycie/Opory (IAE)</strong>
+                    <input 
+                    type="number" value={config.iae_threshold || 50} 
+                    onChange={e => handleChange('iae_threshold', Number(e.target.value))} 
+                    style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} 
+                    />
+                </div>
+
+                {/* ISE - Kolizje */}
+                <div style={{ background: '#222', padding: '10px', borderRadius: '4px', borderLeft: '3px solid #f44336' }}>
+                    <strong style={{ color: '#f44336', fontSize: '0.85rem' }}>💥 Kolizje/Szarpnięcia (ISE)</strong>
+                    <input 
+                    type="number" value={config.ise_threshold || 100} 
+                    onChange={e => handleChange('ise_threshold', Number(e.target.value))} 
+                    style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} 
+                    />
+                </div>
+                </div>
+            </div>
+            )}
             </div>
           )}
         </section>

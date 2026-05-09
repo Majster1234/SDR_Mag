@@ -6,31 +6,16 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import { getUnit, getErrorColor } from './utils';
 
-type Metric = 'MAE' | 'IAE' | 'ISE';
-const METRICS: Metric[] = ['MAE', 'IAE', 'ISE'];
+type Metric = 'MAE' | 'MSE' | 'IAE' | 'ISE';
+const METRICS: Metric[] = ['MAE', 'MSE', 'IAE', 'ISE'];
 
-const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker }: any) => {
-  const { areas: violationAreas, violationPercent } = useMemo(() => {
-    if (!data || data.length === 0) return { areas: [], violationPercent: 0 };
-    const areas: { start: number, end: number }[] = [];
-    let violationStart: number | null = null;
-    let violationCount = 0;
-    for (let i = 0; i < data.length; i++) {
-      const d = data[i];
-      const isOut = d.Badany !== null && d.UpperLimit !== null && d.LowerLimit !== null && (d.Badany > d.UpperLimit || d.Badany < d.LowerLimit);
-      if (isOut) { violationCount++; if (violationStart === null) violationStart = d.Time; } 
-      else if (!isOut && violationStart !== null) { areas.push({ start: violationStart, end: d.Time }); violationStart = null; }
-    }
-    if (violationStart !== null) areas.push({ start: violationStart, end: data[data.length - 1].Time });
-    return { areas, violationPercent: (violationCount / data.length) * 100 };
-  }, [data]);
-  
+// MINI WYKRES: Zero matematyki, przyjmuje gotowe obszary błędu z Propsów!
+const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker, violationAreas, violationPercent }: any) => {
   const getBadgeColor = () => {
       if (violationPercent === 0) return '#4caf50';
       if (violationPercent >= failureThreshold) return '#f44336';
       return '#ff9800';
   };
-
   return (
     <div style={{ background: '#111', padding: '10px', borderRadius: '8px', border: '1px solid #333', marginBottom: '10px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -39,29 +24,17 @@ const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker 
           {violationPercent > 0 ? `${violationPercent.toFixed(1)}% błędów` : 'OK'}
         </span>
       </div>
-      
-      {/* Dodaliśmy position: 'relative' */}
       <div style={{ height: '120px', position: 'relative' }}>
-        
-        {/* NASZA SUPERSZYBKA LINIA DLA MINI WYKRESU */}
         {showTimeMarker && (
-          <div 
-            className="mini-sync-line" // Używamy klasy zamiast Refa!
-            style={{ 
-              position: 'absolute', top: 5, bottom: 5, width: '2px', backgroundColor: '#9c27b0', 
-              left: '5px', zIndex: 100, pointerEvents: 'none', transition: 'none' 
-            }} 
-          />
+          <div className="mini-sync-line" style={{ position: 'absolute', top: 5, bottom: 5, width: '2px', backgroundColor: '#9c27b0', left: '5px', zIndex: 100, pointerEvents: 'none' }} />
         )}
-
         <ResponsiveContainer width="100%" height="100%">
-          {/* Usztywniliśmy marginesy na 5px */}
           <ComposedChart data={data} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
             <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
             <XAxis dataKey="Time" hide />
             <YAxis domain={['auto', 'auto']} hide />
             <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#444' }} formatter={(v: any) => [Number(v).toFixed(2), '']} />
-            {violationAreas.map((area, idx) => <ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />)}
+            {violationAreas && violationAreas.map((area: any, idx: number) => <ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />)}
             <Line dataKey="UpperLimit" stroke="#9e9e9e" strokeDasharray="3 3" dot={false} strokeOpacity={0.4} isAnimationActive={false} />
             <Line dataKey="LowerLimit" stroke="#9e9e9e" strokeDasharray="3 3" dot={false} strokeOpacity={0.4} isAnimationActive={false} />
             <Line dataKey="Referencja" stroke="#4caf50" strokeWidth={1} dot={false} isAnimationActive={false} />
@@ -101,12 +74,17 @@ const PrecalculatedRobot = ({ points }: { points: number[][] }) => {
   );
 };
 
-// --- ODTWARZACZ 3D Z PRZECIĄGANYM NAROŻNIKIEM (DRAG TO RESIZE) ---
+// --- ZOPTYMALIZOWANY ODTWARZACZ 3D Z IDEALNĄ SYNCHRONIZACJĄ CZASU ---
 const RobotPlayer3D = ({ trajectory, displayedData, testData, playbackIndex, setPlaybackIndex, handleLiveScrub, isTrajectoryLoading }: any) => {
   const [localIndex, setLocalIndex] = useState(playbackIndex || 0);
   const [isDocked, setIsDocked] = useState(false);
 
-  // Wymiary okna w trybie przypiętym
+  const [isPlaying, setIsPlaying] = useState(false);
+  const isPlayingRef = useRef(isPlaying);
+  
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0);
+  const speedRef = useRef(playbackSpeed);
+
   const [dockWidth, setDockWidth] = useState(450); 
   const [dockHeight, setDockHeight] = useState(280);
 
@@ -114,25 +92,85 @@ const RobotPlayer3D = ({ trajectory, displayedData, testData, playbackIndex, set
     setLocalIndex(playbackIndex);
   }, [playbackIndex]);
 
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    speedRef.current = playbackSpeed;
+  }, [playbackSpeed]);
+
+  // GŁÓWNA PĘTLA ANIMACJI Z CIĄGŁYM "WIRTUALNYM CZASEM"
+  useEffect(() => {
+    let frameId: number;
+    let lastTime = performance.now();
+    let currentIndex = localIndex;
+    
+    // Niezależny, idealnie tykający stoper odtwarzania
+    let virtualTime = displayedData[currentIndex]?.Time || 0; 
+
+    const loop = (time: number) => {
+      if (!isPlayingRef.current) return;
+
+      const deltaSec = (time - lastTime) / 1000.0;
+      lastTime = time;
+
+      if (!displayedData || displayedData.length === 0) return;
+
+      // 1. Aktualizujemy wirtualny czas niezależnie od danych w CSV!
+      virtualTime += deltaSec * speedRef.current;
+
+      let nextIndex = currentIndex;
+      
+      // 2. Przesuwamy się do przodu tylko wtedy, gdy NASTĘPNA próbka jest starsza niż nasz stoper
+      // (Używamy nextIndex + 1, żeby nie nadpisywać czasu i nie powodować przyspieszenia)
+      while (nextIndex < displayedData.length - 1 && displayedData[nextIndex + 1].Time <= virtualTime) {
+        nextIndex++;
+      }
+
+      if (nextIndex >= displayedData.length - 1) {
+        setIsPlaying(false);
+        setLocalIndex(displayedData.length - 1);
+        setPlaybackIndex(displayedData.length - 1);
+        if (handleLiveScrub) handleLiveScrub(displayedData.length - 1);
+        return;
+      }
+
+      if (nextIndex !== currentIndex) {
+        currentIndex = nextIndex;
+        setLocalIndex(currentIndex);
+        if (handleLiveScrub) handleLiveScrub(currentIndex);
+      }
+
+      frameId = requestAnimationFrame(loop);
+    };
+
+    if (isPlaying) {
+      lastTime = performance.now();
+      currentIndex = localIndex;
+      // Przy starcie (lub wznowieniu) resetujemy wirtualny stoper do czasu wybranej klatki
+      virtualTime = displayedData[currentIndex]?.Time || 0; 
+      frameId = requestAnimationFrame(loop);
+    }
+
+    return () => cancelAnimationFrame(frameId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlaying, displayedData]); 
+
   const currentTime = displayedData[localIndex]?.Time;
   const absoluteIndex = testData.findIndex((d: any) => d.Time === currentTime);
   const actualIndex = absoluteIndex !== -1 ? absoluteIndex : localIndex;
 
-  // FUNKCJA OBSŁUGUJĄCA ZMIANĘ ROZMIARU OKNA (DRAG & DROP)
   const startResize = (e: React.MouseEvent) => {
-    e.preventDefault(); // Zapobiega zaznaczaniu tekstu podczas ciągnięcia
+    e.preventDefault(); 
     const startX = e.clientX;
     const startY = e.clientY;
     const startW = dockWidth;
     const startH = dockHeight;
 
     const onMouseMove = (eMove: MouseEvent) => {
-      // Okno jest przypięte do prawego dołu. 
-      // Ruch w lewo (mniejszy X) ZWIĘKSZA szerokość. Ruch w górę (mniejszy Y) ZWIĘKSZA wysokość.
       const newW = startW + (startX - eMove.clientX);
       const newH = startH + (startY - eMove.clientY);
-
-      // Limity rozmiarów okna (min 300x200, max 1200x800)
       setDockWidth(Math.max(300, Math.min(newW, 1200)));
       setDockHeight(Math.max(200, Math.min(newH, 800)));
     };
@@ -140,64 +178,79 @@ const RobotPlayer3D = ({ trajectory, displayedData, testData, playbackIndex, set
     const onMouseUp = () => {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
-      document.body.style.cursor = 'default'; // Reset kursora
+      document.body.style.cursor = 'default'; 
     };
 
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
-    document.body.style.cursor = 'nwse-resize'; // Utrzymuje kursor zmiany rozmiaru wszędzie
+    document.body.style.cursor = 'nwse-resize'; 
   };
 
   return (
     <div style={{ 
-      marginTop: isDocked ? '0' : '3rem', 
-      padding: '1rem', 
-      background: isDocked ? 'rgba(25, 25, 25, 0.98)' : '#222', 
-      backdropFilter: isDocked ? 'blur(12px)' : 'none',
-      borderRadius: '8px', 
-      border: isDocked ? '2px solid #9c27b0' : '1px solid #333', 
-      
-      // Dynamiczna pozycja i szerokość
-      position: isDocked ? 'fixed' : 'relative',
-      bottom: isDocked ? '20px' : 'auto', 
-      right: isDocked ? '20px' : 'auto',
-      width: isDocked ? `${dockWidth}px` : 'auto',
-      
-      zIndex: isDocked ? 2000 : 1,
+      marginTop: isDocked ? '0' : '3rem', padding: '1rem', 
+      background: isDocked ? 'rgba(25, 25, 25, 0.98)' : '#222', backdropFilter: isDocked ? 'blur(12px)' : 'none',
+      borderRadius: '8px', border: isDocked ? '2px solid #9c27b0' : '1px solid #333', 
+      position: isDocked ? 'fixed' : 'relative', bottom: isDocked ? '20px' : 'auto', right: isDocked ? '20px' : 'auto',
+      width: isDocked ? `${dockWidth}px` : 'auto', zIndex: isDocked ? 2000 : 1,
       boxShadow: isDocked ? '0 20px 50px rgba(0,0,0,0.9)' : 'none',
-      // Płynne wejście w tryb dock, ale brak animacji podczas zmiany rozmiaru (żeby kursor nie uciekał)
       transition: isDocked ? 'none' : 'all 0.3s ease-in-out'
     }}>
       
-      {/* NAROŻNIK DO ZMIANY ROZMIARU (Pojawia się tylko gdy przypięto) */}
       {isDocked && (
         <div 
-          onMouseDown={startResize}
-          title="Złap i przeciągnij, aby zmienić rozmiar"
+          onMouseDown={startResize} title="Złap i przeciągnij, aby zmienić rozmiar"
           style={{
-            position: 'absolute',
-            top: 0, 
-            left: 0,
-            width: '25px', 
-            height: '25px',
-            cursor: 'nwse-resize',
-            zIndex: 10,
-            borderTopLeftRadius: '6px',
-            // Rysuje dyskretny fioletowy trójkącik w lewym górnym rogu
+            position: 'absolute', top: 0, left: 0, width: '25px', height: '25px', cursor: 'nwse-resize', zIndex: 10, borderTopLeftRadius: '6px',
             background: 'linear-gradient(135deg, rgba(156,39,176,0.8) 0%, rgba(156,39,176,0.8) 30%, transparent 30%)'
           }}
         />
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', paddingLeft: isDocked ? '15px' : '0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <h3 style={{ color: '#9c27b0', margin: 0, fontSize: isDocked ? '1rem' : '1.17em' }}>🤖 Bliźniak 3D</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <h3 style={{ color: '#9c27b0', margin: 0, fontSize: isDocked ? '1rem' : '1.17em', marginRight: '10px' }}>🤖 Bliźniak 3D</h3>
+          
+          <button 
+            onClick={() => {
+              if (!isPlaying && localIndex >= displayedData.length - 1) {
+                setLocalIndex(0);
+                setPlaybackIndex(0);
+                if (handleLiveScrub) handleLiveScrub(0);
+              }
+              if (isPlaying) setPlaybackIndex(localIndex); 
+              setIsPlaying(!isPlaying);
+            }}
+            style={{
+              background: isPlaying ? '#ff9800' : '#4caf50', color: 'white', 
+              border: 'none', borderRadius: '4px', padding: '4px 10px', 
+              fontSize: '0.75rem', cursor: 'pointer', fontWeight: 'bold'
+            }}
+          >
+            {isPlaying ? '⏸ Pauza' : '▶ Play'}
+          </button>
+
+          <select 
+            value={playbackSpeed} onChange={(e) => setPlaybackSpeed(Number(e.target.value))}
+            style={{
+              background: '#333', color: 'white', border: '1px solid #555', 
+              borderRadius: '4px', padding: '3px 5px', fontSize: '0.75rem', cursor: 'pointer', outline: 'none'
+            }}
+          >
+            <option value={0.1}>0.1x</option>
+            <option value={0.25}>0.25x</option>
+            <option value={0.5}>0.5x</option>
+            <option value={1.0}>1.0x</option>
+            <option value={2.0}>2.0x</option>
+            <option value={5.0}>5.0x</option>
+          </select>
+
           <button 
             onClick={() => setIsDocked(!isDocked)}
             style={{
               background: isDocked ? '#e91e63' : '#444', color: 'white', 
               border: 'none', borderRadius: '4px', padding: '4px 10px', 
-              fontSize: '0.75rem', cursor: 'pointer', fontWeight: 'bold'
+              fontSize: '0.75rem', cursor: 'pointer', fontWeight: 'bold', marginLeft: '5px'
             }}
           >
             {isDocked ? '🔓 Odepnij' : '📌 Przypnij'}
@@ -210,22 +263,22 @@ const RobotPlayer3D = ({ trajectory, displayedData, testData, playbackIndex, set
       </div>
 
       <input 
-        type="range" 
-        min={0} 
-        max={Math.max(displayedData.length - 1, 0)} 
-        value={localIndex} 
+        type="range" min={0} max={Math.max(displayedData.length - 1, 0)} value={localIndex} 
         onChange={(e) => {
             const newIdx = Number(e.target.value);
             setLocalIndex(newIdx); 
             if (handleLiveScrub) handleLiveScrub(newIdx); 
         }}
         onMouseUp={() => setPlaybackIndex(localIndex)} 
+        onMouseDown={() => {
+          setIsPlaying(false);
+          setPlaybackIndex(localIndex); 
+        }} 
         style={{ width: '100%', marginBottom: '10px', cursor: 'pointer' }} 
       />
 
       <div style={{ 
-        height: isDocked ? `${dockHeight}px` : '500px', // Zależne od stanu drag & drop
-        background: '#111', borderRadius: '6px', border: '1px solid #444', overflow: 'hidden', position: 'relative'
+        height: isDocked ? `${dockHeight}px` : '500px', background: '#111', borderRadius: '6px', border: '1px solid #444', overflow: 'hidden', position: 'relative'
       }}>
         {isTrajectoryLoading ? (
           <div style={{ padding: '1rem', color: '#00bcd4', textAlign: 'center' }}>
@@ -247,11 +300,13 @@ const RobotPlayer3D = ({ trajectory, displayedData, testData, playbackIndex, set
     </div>
   );
 };
-
 export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | null }) => {
   const [robotInfo, setRobotInfo] = useState<any>(null);
-  const [refData, setRefData] = useState<any[]>([]);
-  const [testData, setTestData] = useState<any[]>([]);
+  
+  // NOWY GŁÓWNY STAN: Wynik obliczeń z Backendu!
+  const [diagnosis, setDiagnosis] = useState<any>(null);
+  const [testData, setTestData] = useState<any[]>([]); // Tylko po to, by mieć surowy czas dla 3D
+
   const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [selectedColumn, setSelectedColumn] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
@@ -262,52 +317,51 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const [playbackIndex, setPlaybackIndex] = useState<number>(0);
   const [trajectory, setTrajectory] = useState<any[]>([]);
   const [isTrajectoryLoading, setIsTrajectoryLoading] = useState(false);
-  const robotName = selectedFilePath ? selectedFilePath.split(/[/\\]/)[1] : '';
-  const isFile = selectedFilePath ? selectedFilePath.endsWith('.csv') : false;
   const [showTimeMarker, setShowTimeMarker] = useState<boolean>(true);
+  
   const mainChartLineRef = useRef<HTMLDivElement>(null);
   const diffChartLineRef = useRef<HTMLDivElement>(null);
-  
+
+  const robotName = selectedFilePath ? selectedFilePath.split(/[/\\]/)[1] : '';
+  const isFile = selectedFilePath ? selectedFilePath.endsWith('.csv') : false;
+
+  // 1. GŁÓWNY EFEKT: Pobieranie przeliczonych danych z Pythona
   useEffect(() => {
-    if (!robotName) return;
-    const fetchRef = async () => {
+    if (!robotName || !isFile || !selectedFilePath) return;
+    
+    const fetchAllData = async () => {
       setIsLoading(true);
       try {
+        // Pobierz info o robocie
         const resInfo = await fetch('http://127.0.0.1:8000/api/robot-info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ robot_name: robotName }) });
-        if (resInfo.ok) {
-          const info = await resInfo.json();
-          setRobotInfo(info);
-          if (info.ref_file_info) {
-            const refPath = `Roboty/${robotName}/Przebieg_referencyjny/${info.ref_file_info.name}`;
-            const resData = await fetch('http://127.0.0.1:8000/api/file-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: refPath }) });
-            if (resData.ok) {
-              const data = await resData.json();
-              setRefData(data);
-              if (data.length > 0) {
-                 const cols = Object.keys(data[0]).filter(c => c !== 'Time' && c !== 'Label');
-                 setAvailableColumns(cols);
-                 if (!selectedColumn) setSelectedColumn(cols[0]);
-              }
-            }
-          } else { setRefData([]); }
+        if (resInfo.ok) setRobotInfo(await resInfo.json());
+
+        // Surowe dane do mapowania czasu 3D
+        const resTest = await fetch('http://127.0.0.1:8000/api/file-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: selectedFilePath }) });
+        if (resTest.ok) setTestData(await resTest.json());
+
+        // GŁÓWNE ZAPYTANIE: Analiza Diagnostyczna
+        const resDiag = await fetch('http://127.0.0.1:8000/api/diagnose', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ robot_name: robotName, test_file_path: selectedFilePath })
+        });
+        
+        if (resDiag.ok) {
+          const diagData = await resDiag.json();
+          if (!diagData.error) {
+            setDiagnosis(diagData);
+            setAvailableColumns(diagData.columns);
+            if (!selectedColumn) setSelectedColumn(diagData.columns[0]);
+            setZoomRange(null);
+          }
         }
       } catch (e) { console.error(e); }
       setIsLoading(false);
     };
-    fetchRef();
-  }, [robotName]);
+    fetchAllData();
+  }, [robotName, selectedFilePath]);
 
-  useEffect(() => {
-    if (!isFile || !selectedFilePath) { setTestData([]); return; }
-    const fetchTest = async () => {
-      try {
-        const resData = await fetch('http://127.0.0.1:8000/api/file-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: selectedFilePath }) });
-        if (resData.ok) { setTestData(await resData.json()); setZoomRange(null); }
-      } catch (e) { console.error(e); }
-    };
-    fetchTest();
-  }, [selectedFilePath, isFile]);
-
+  // Pobieranie trajektorii 3D
   useEffect(() => {
     if (!selectedFilePath) return;
     const fetchKinematics = async () => {
@@ -324,101 +378,34 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
     fetchKinematics();
   }, [selectedFilePath]);
 
-  const prepareColumnData = (colName: string) => {
-    if (!colName || refData.length === 0 || testData.length === 0) return [];
-    const maxLen = Math.max(refData.length, testData.length);
-    const config = robotInfo?.config || {};
-    const isA = colName.startsWith('A');
-    const devThr = isA ? (config.a_deviation_threshold || 0) : (config.cur_deviation_threshold || 0);
-    const offThr = isA ? (config.a_offset_threshold || 0) : (config.cur_offset_threshold || 0);
-    const deadbandThr = isA ? (config.a_deadband_threshold || 0.05) : (config.cur_deadband_threshold || 0.5);
-    const diagType = config.diagnosis_type || 'Odchylenia';
-    const windowSize = 5; 
-    const result = [];
-    for(let i = 0; i < maxLen; i++) {
-       const r = refData[i] || {};
-       const t = testData[i] || {};
-       const time = r.Time !== undefined ? r.Time : (t.Time !== undefined ? t.Time : i);
-       const rVal = r[colName] ?? null;
-       const tVal = t[colName] ?? null;
-       let upper = null; let lower = null;
-       if (rVal !== null) {
-         let margin = offThr;
-         if (diagType === 'Odchylenia') {
-           let localMax = 0;
-           for (let j = Math.max(0, i - windowSize); j <= Math.min(refData.length - 1, i + windowSize); j++) {
-             localMax = Math.max(localMax, Math.abs(refData[j]?.[colName] || 0));
-           }
-           margin = Math.max(localMax * (devThr / 100), deadbandThr);
-         }
-         upper = rVal + margin; lower = rVal - margin;
-       }
-       result.push({ Time: time, Referencja: rVal, Badany: tVal, UpperLimit: upper, LowerLimit: lower, Roznica: (rVal !== null && tVal !== null) ? Number((tVal - rVal).toFixed(4)) : null });
-    }
-    return result;
-  };
 
-  const combinedData = useMemo(() => prepareColumnData(selectedColumn), [refData, testData, selectedColumn, robotInfo]);
-  const displayedData = useMemo(() => { return zoomRange ? combinedData.filter(d => d.Time >= zoomRange[0] && d.Time <= zoomRange[1]) : combinedData; }, [combinedData, zoomRange]);
+  // =====================================================================
+  // CIENKI KLIENT - CAŁA MATEMATYKA ZNIKNĘŁA! Po prostu mapujemy z JSONa.
+  // =====================================================================
+  const combinedData = diagnosis?.chartData?.[selectedColumn] || [];
+  
+  // Aplikowanie zooma na gotowe dane
+  const displayedData = useMemo(() => {
+    return zoomRange ? combinedData.filter((d: any) => d.Time >= zoomRange[0] && d.Time <= zoomRange[1]) : combinedData;
+  }, [combinedData, zoomRange]);
 
-  const statsData = useMemo(() => {
-    if (refData.length === 0 || testData.length === 0 || availableColumns.length === 0) return null;
-    const errors: Record<string, Record<string, number>> = { MAE: {}, IAE: {}, ISE: {} };
-    const maxLen = Math.min(refData.length, testData.length);
-    availableColumns.forEach(col => {
-      let sumAbs = 0, sumSqr = 0, count = 0, integralAbs = 0, integralSqr = 0;
-      for (let i = 0; i < maxLen; i++) {
-        const r = refData[i]?.[col]; const t = testData[i]?.[col];
-        if (r !== undefined && r !== null && t !== undefined && t !== null) {
-          const err = t - r; sumAbs += Math.abs(err); count++;
-          let dt = 0; if (i > 0) { dt = (refData[i]?.Time ?? i) - (refData[i - 1]?.Time ?? (i - 1)); }
-          integralAbs += Math.abs(err) * dt; integralSqr += (err * err) * dt;
-        }
-      }
-      errors.MAE[col] = count > 0 ? sumAbs / count : 0; errors.IAE[col] = integralAbs; errors.ISE[col] = integralSqr;
-    });
-    const aCols = availableColumns.filter(c => c.startsWith('A')).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    const curCols = availableColumns.filter(c => c.startsWith('Cur')).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-    const maxes = {
-      A: { MAE: Math.max(...aCols.map(c => errors.MAE[c]), 0.0001), IAE: Math.max(...aCols.map(c => errors.IAE[c]), 0.0001), ISE: Math.max(...aCols.map(c => errors.ISE[c]), 0.0001) },
-      Cur: { MAE: Math.max(...curCols.map(c => errors.MAE[c]), 0.0001), IAE: Math.max(...curCols.map(c => errors.IAE[c]), 0.0001), ISE: Math.max(...curCols.map(c => errors.ISE[c]), 0.0001) }
-    };
-    return { errors, aCols, curCols, maxes };
-  }, [refData, testData, availableColumns]);
+  const statsData = diagnosis?.statsData;
+  const globalDiagnosis = diagnosis?.globalDiagnosis;
+  const violationAreas = diagnosis?.violationAreas?.[selectedColumn] || [];
+  const violationPercent = diagnosis?.statsData?.violationPercents?.[selectedColumn] || 0;
 
-  const { areas: violationAreas, violationPercent } = useMemo(() => {
-    if (!displayedData || displayedData.length === 0) return { areas: [], violationPercent: 0 };
-    const areas: { start: number, end: number }[] = [];
-    let violationStart: number | null = null;
-    let violationCount = 0;
-    for (let i = 0; i < displayedData.length; i++) {
-      const d = displayedData[i];
-      const isOut = d.Badany !== null && d.UpperLimit !== null && d.LowerLimit !== null && (d.Badany > d.UpperLimit || d.Badany < d.LowerLimit);
-      if (isOut) { violationCount++; if (violationStart === null) violationStart = d.Time; } 
-      else if (!isOut && violationStart !== null) { areas.push({ start: violationStart, end: d.Time }); violationStart = null; }
-    }
-    if (violationStart !== null) areas.push({ start: violationStart, end: displayedData[displayedData.length - 1].Time });
-    return { areas, violationPercent: (violationCount / displayedData.length) * 100 };
-  }, [displayedData]);
-
-const handleLiveScrub = (index: number) => {
-    if (!displayedData || displayedData.length < 2) return;
-    const percent = index / (displayedData.length - 1);
+  // Płynny suwak
+  const handleLiveScrub = (index: number) => {
+    if (!combinedData || combinedData.length < 2) return;
+    const percent = index / (combinedData.length - 1);
     
-    // 1. DUŻE WYKRESY (mają 65px marginesu na teksty na Osi Y)
     const mainCssCalc = `calc(65px + (100% - 95px) * ${percent})`;
     if (mainChartLineRef.current) mainChartLineRef.current.style.left = mainCssCalc;
     if (diffChartLineRef.current) diffChartLineRef.current.style.left = mainCssCalc;
 
-    // 2. MINI WYKRESY (nie mają osi, margines to sztywne 5px)
     const miniCssCalc = `calc(5px + (100% - 10px) * ${percent})`;
-    const miniLines = document.querySelectorAll<HTMLElement>('.mini-sync-line');
-    miniLines.forEach(line => {
-      line.style.left = miniCssCalc;
-    });
+    document.querySelectorAll<HTMLElement>('.mini-sync-line').forEach(line => line.style.left = miniCssCalc);
   };
-
-  useEffect(() => { handleLiveScrub(playbackIndex); }, [playbackIndex, displayedData]);
 
   const handleZoom = () => {
     if (refAreaLeft === refAreaRight || refAreaLeft === null || refAreaRight === null) { setRefAreaLeft(null); setRefAreaRight(null); return; }
@@ -469,19 +456,73 @@ const handleLiveScrub = (index: number) => {
                         </tr>
                         <tr>
                           <th style={{ padding: '8px', borderBottom: '1px solid #444', borderRight: '1px solid #444', color: '#888', textAlign: 'left' }}>Wskaźnik</th>
-                          {statsData.aCols.map(c => <th key={c} style={{ padding: '8px', borderBottom: '1px solid #444', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #444' : 'none', color: '#bbb' }}>{c}</th>)}
-                          {statsData.curCols.map(c => <th key={c} style={{ padding: '8px', borderBottom: '1px solid #444', color: '#bbb' }}>{c}</th>)}
+                          {statsData?.aCols?.map((c: string) => <th key={c} style={{ padding: '8px', borderBottom: '1px solid #444', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #444' : 'none', color: '#bbb' }}>{c}</th>)}
+                          {statsData?.curCols?.map((c: string) => <th key={c} style={{ padding: '8px', borderBottom: '1px solid #444', color: '#bbb' }}>{c}</th>)}
                         </tr>
                       </thead>
                       <tbody>
                         {METRICS.map(metric => (
-                          <tr key={metric}>
-                            <td style={{ padding: '8px', borderBottom: '1px solid #333', borderRight: '1px solid #444', textAlign: 'left', fontWeight: 'bold', color: '#00bcd4' }}>{metric}</td>
-                            {statsData.aCols.map(c => { const val = statsData.errors[metric][c]; const bgColor = getErrorColor(val, statsData.maxes.A[metric]); return (<td key={c} style={{ padding: '8px', borderBottom: '1px solid #333', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #444' : 'none' }}><div style={{ background: '#222', borderBottom: `4px solid ${bgColor}`, padding: '4px', borderRadius: '4px', fontWeight: 'bold' }}>{val.toFixed(3)}</div></td>); })}
-                            {statsData.curCols.map(c => { const val = statsData.errors[metric][c]; const bgColor = getErrorColor(val, statsData.maxes.Cur[metric]); return (<td key={c} style={{ padding: '8px', borderBottom: '1px solid #333' }}><div style={{ background: '#222', borderBottom: `4px solid ${bgColor}`, padding: '4px', borderRadius: '4px', fontWeight: 'bold' }}>{val.toFixed(3)}</div></td>); })}
-                          </tr>
+                            <tr key={metric}>
+                            <td style={{ 
+                                padding: '8px', 
+                                borderBottom: '1px solid #333', 
+                                borderRight: '1px solid #444', 
+                                textAlign: 'left', 
+                                fontWeight: 'bold', 
+                                color: '#00bcd4' 
+                            }}>
+                                {metric}
+                            </td>
+                            
+                            {/* Kolumny dla Osi (A) */}
+                            {statsData.aCols.map((c: any) => { 
+                                const val = statsData.errors[metric][c]; 
+                                const bgColor = getErrorColor(val, statsData.maxes.A[metric]); 
+                                // Tworzymy przezroczystą wersję koloru dla tła (0.15 opacity)
+                                const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.15)');
+                                
+                                return (
+                                <td key={c} style={{ 
+                                    padding: '8px', 
+                                    borderBottom: '1px solid #333', 
+                                    borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #444' : 'none' 
+                                }}>
+                                    <div style={{ 
+                                    background: `linear-gradient(180deg, #222 0%, ${lightBg} 100%)`, 
+                                    borderBottom: `4px solid ${bgColor}`, 
+                                    padding: '4px', 
+                                    borderRadius: '4px', 
+                                    fontWeight: 'bold' 
+                                    }}>
+                                    {val.toFixed(5)}
+                                    </div>
+                                </td>
+                                ); 
+                            })}
+
+                            {/* Kolumny dla Prądów (Cur) */}
+                            {statsData.curCols.map((c: any) => { 
+                                const val = statsData.errors[metric][c]; 
+                                const bgColor = getErrorColor(val, statsData.maxes.Cur[metric]); 
+                                const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.15)');
+                                
+                                return (
+                                <td key={c} style={{ padding: '8px', borderBottom: '1px solid #333' }}>
+                                    <div style={{ 
+                                    background: `linear-gradient(180deg, #222 0%, ${lightBg} 100%)`, 
+                                    borderBottom: `4px solid ${bgColor}`, 
+                                    padding: '4px', 
+                                    borderRadius: '4px', 
+                                    fontWeight: 'bold' 
+                                    }}>
+                                    {val.toFixed(5)}
+                                    </div>
+                                </td>
+                                ); 
+                            })}
+                            </tr>
                         ))}
-                      </tbody>
+                        </tbody>
                     </table>
                   </div>
                 </div>
@@ -544,7 +585,7 @@ const handleLiveScrub = (index: number) => {
                     <YAxis domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
                     <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#444' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => { if (Array.isArray(v)) return [`od ${v[0].toFixed(2)} do ${v[1].toFixed(2)} ${unit}`, name]; return [`${Number(v).toFixed(2)} ${unit}`, name]; }} />
                     <Legend verticalAlign="top" height={36} />
-                    {violationAreas.map((area, idx) => (<ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />))}
+                    {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />))}
                     <Line name="Górny limit" type="monotone" dataKey="UpperLimit" stroke="#9e9e9e" strokeDasharray="4 4" dot={false} isAnimationActive={false} />
                     <Line name="Dolny limit" type="monotone" dataKey="LowerLimit" stroke="#9e9e9e" strokeDasharray="4 4" dot={false} isAnimationActive={false} />
                     <Line name="Referencja" type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={2} dot={false} isAnimationActive={false} />
@@ -573,7 +614,7 @@ const handleLiveScrub = (index: number) => {
                     <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#888" label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#aaa' }} />
                     <YAxis domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
                     <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#444' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any) => [`${Number(v).toFixed(2)} ${unit}`, 'Δ Różnica']} />
-                    {violationAreas.map((area, idx) => (<ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />))}
+                    {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />))}
                     <Line name="Δ Odchylenie (Badany - Ref)" type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={2} dot={false} isAnimationActive={false} />
                     {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#e91e63" fillOpacity={0.3} />}
                   </LineChart>
@@ -581,27 +622,48 @@ const handleLiveScrub = (index: number) => {
               </div>
             </>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '1rem' }}>
+            
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '1rem' }}>
+            
+            {/* KOLUMNA 1: OSIE KĄTOWE (A) */}
             <div>
-              <h4 style={{ color: '#00bcd4', textAlign: 'center', borderBottom: '1px solid #333', paddingBottom: '5px', marginTop: 0 }}>Osie Kątowe (A)</h4>
-              {statsData?.aCols.map(col => (
+              <h4 style={{ color: '#00bcd4', textAlign: 'center', borderBottom: '1px solid #333', paddingBottom: '5px', marginTop: 0 }}>
+                Osie Kątowe (A)
+              </h4>
+              {statsData?.aCols?.map((col: string) => (
                 <MiniAnalizaChart 
-                  key={col} title={col} data={prepareColumnData(col)} unit="°" 
+                  key={col} 
+                  title={col} 
+                  unit="°" 
+                  data={diagnosis?.chartData?.[col] || []} 
                   failureThreshold={robotInfo?.config?.max_violation_threshold || 5.0} 
-                  showTimeMarker={showTimeMarker} // Dodane!
+                  showTimeMarker={showTimeMarker} 
+                  violationAreas={diagnosis?.violationAreas?.[col]} 
+                  violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0} 
                 />
               ))}
             </div>
+
+            {/* KOLUMNA 2: PRĄDY SILNIKÓW (Cur) */}
             <div>
-              <h4 style={{ color: '#ffeb3b', textAlign: 'center', borderBottom: '1px solid #333', paddingBottom: '5px', marginTop: 0 }}>Prądy Silników (Cur)</h4>
-              {statsData?.curCols.map(col => (
+              <h4 style={{ color: '#ffeb3b', textAlign: 'center', borderBottom: '1px solid #333', paddingBottom: '5px', marginTop: 0 }}>
+                Prądy Silników (Cur)
+              </h4>
+              {statsData?.curCols?.map((col: string) => (
                 <MiniAnalizaChart 
-                  key={col} title={col} data={prepareColumnData(col)} unit="%" 
+                  key={col} 
+                  title={col} 
+                  unit="%" 
+                  data={diagnosis?.chartData?.[col] || []} 
                   failureThreshold={robotInfo?.config?.max_violation_threshold || 5.0} 
-                  showTimeMarker={showTimeMarker} // Dodane!
+                  showTimeMarker={showTimeMarker} 
+                  violationAreas={diagnosis?.violationAreas?.[col]} 
+                  violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0} 
                 />
               ))}
             </div>
+
           </div>
           )}
             </>
