@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { FileNode } from '../types';
 
-// Zmieniliśmy parametry przekazywane do drzewka, by obsłużyć kliknięcie
 const TreeNode = ({ 
   node, highlightedPath, activeModule, selectedFilePath, onFileSelect, onContextMenu , depth=0
 }: { 
@@ -18,9 +17,13 @@ const TreeNode = ({
   const isExactlyHighlighted = highlightedPath !== null && normalizedNodePath === normalizedHighlighted;
   const isPartOfHighlightedPath = highlightedPath !== null && normalizedHighlighted.startsWith(normalizedNodePath);
   const isSelected = selectedFilePath !== null && normalizedNodePath === normalizedSelected;
+  
+  // NOWE: Rozpoznawanie trybu konfiguracji
+  const isConfigMode = activeModule === 'konfiguracja';
   const isPreviewMode = activeModule === 'podglad_danych';
   const isAnalysisMode = activeModule === 'analiza_przebiegow';
   const isRobotFolder = node.type === 'folder' && depth === 0;
+
   useEffect(() => {
     if (node.type === 'folder' && isPartOfHighlightedPath) setIsOpen(true);
   }, [isPartOfHighlightedPath, node.type]);
@@ -28,8 +31,8 @@ const TreeNode = ({
   const glowStyle = isPartOfHighlightedPath ? { textShadow: '0 0 10px #4caf50', color: '#a8ffca', transition: 'all 0.5s' } : { transition: 'all 0.5s' };
 
   if (node.type === 'folder') {
-    // Specjalne podświetlenie jeśli jesteśmy w module analizy i zaznaczyliśmy tego robota
-    const isSelectedRobot = isAnalysisMode && selectedFilePath && selectedFilePath.startsWith(node.path);
+    // NOWE: Podświetlamy robota również w module konfiguracji
+    const isSelectedRobot = (isAnalysisMode || isConfigMode) && selectedFilePath && selectedFilePath.startsWith(node.path);
     const folderGlow = isSelectedRobot 
       ? { textShadow: '0 0 10px #e91e63', color: '#ff80ab', transition: 'all 0.5s' } 
       : glowStyle;
@@ -39,8 +42,8 @@ const TreeNode = ({
         <div 
           onClick={() => {
             setIsOpen(!isOpen);
-            // Jeśli tryb analizy i to jest folder robota -> wybieramy go!
-            if (isAnalysisMode && isRobotFolder) {
+            // NOWE: Pozwalamy na wybranie robota w trybie analizy ORAZ konfiguracji
+            if ((isAnalysisMode || isConfigMode) && isRobotFolder) {
               onFileSelect(node.path);
             }
           }} 

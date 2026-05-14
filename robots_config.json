@@ -9,17 +9,22 @@
         "model": "KUKA KR 120",
         "location": "Salka testowa H2",
         "is_diagnosed": true,
-        "diagnosis_type": "Odchylenie (offsetowe)",
+        "diagnosis_type": "Odchylenia",
         "deviation_threshold": 15,
         "offset_threshold": 5,
         "selected_metric": "MAE",
         "metric_threshold": 10,
         "a_deviation_threshold": 2,
-        "cur_deviation_threshold": 5,
-        "a_offset_threshold": 0.01,
-        "cur_offset_threshold": 2,
+        "cur_deviation_threshold": 2,
+        "a_offset_threshold": 1,
+        "cur_offset_threshold": 0.1,
         "a_deadband_threshold": 0.01,
-        "cur_deadband_threshold": 2,
-        "max_violation_threshold": 30
+        "cur_deadband_threshold": 0.5,
+        "max_violation_threshold": 30,
+        "iae_threshold": 1,
+        "ise_threshold": 1,
+        "mae_threshold": 1,
+        "mse_threshold": 1,
+        "sigma_multiplier": 2
     }
 }

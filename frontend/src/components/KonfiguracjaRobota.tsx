@@ -17,10 +17,11 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
     max_violation_threshold: 30.0,
     selected_metric: 'MAE', 
     metric_threshold: 10,
-    iae_threshold: 50,
-    ise_threshold: 50,
-    mae_threshold: 0.5,
-    mse_threshold: 1.0
+    iae_threshold: 1.0,
+    ise_threshold: 1.0,
+    mae_threshold: 1.0,
+    mse_threshold: 1.0,
+    sigma_multiplier: 1.0
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -109,14 +110,32 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
             <div style={{ paddingLeft: '28px', display: 'flex', flexDirection: 'column', gap: '15px', borderLeft: '2px solid #333' }}>
               <div>
                 <label style={{ color: '#aaa', fontSize: '0.9rem', marginRight: '10px' }}>Typ diagnozy:</label>
-                <select value={config.diagnosis_type} onChange={e => handleChange('diagnosis_type', e.target.value)} style={{ padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '4px' }}>
+                <select value={config.diagnosis_type} onChange={e => handleChange('diagnosis_type', e.target.value)}>
                   <option value="Odchylenia">Odchylenie (procentowe)</option>
                   <option value="Odchylenie (offsetowe)">Odchylenie (offsetowe)</option>
                   <option value="Wskaźniki">Wskaźniki matematyczne</option>
+                  <option value="Statystyka">Statystyka (Reguła 3-Sigma)</option>
                 </select>
               </div>
 
               <div style={{ marginTop: '20px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                {config.diagnosis_type === 'Statystyka' && (
+                    <div style={{ marginTop: '20px', background: '#222', padding: '15px', borderRadius: '6px', borderLeft: '3px solid #ffeb3b' }}>
+                      <h4 style={{ color: '#ffeb3b', marginTop: 0 }}>📊 Parametry statystyczne</h4>
+                      <label style={{ display: 'block', color: '#888', fontSize: '0.85rem' }}>Mnożnik Sigmy (Czułość):</label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '15px', marginTop: '5px' }}>
+                        <input 
+                          type="number" step="0.1" 
+                          value={config.sigma_multiplier || 3.0} 
+                          onChange={e => handleChange('sigma_multiplier', Number(e.target.value))} 
+                          style={{ width: '100px', padding: '8px', background: '#333', color: '#fff', border: '1px solid #555' }} 
+                        />
+                        <span style={{ fontSize: '0.8rem', color: '#aaa' }}>
+                          Standardowo: <strong>3.0</strong> (Reguła 3-Sigma obejmuje 99.7% szumu).
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 {config.diagnosis_type === 'Odchylenia' && (
                   <>
                     <div>
@@ -149,52 +168,47 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
                   </>
                 )}
               </div>
+            {/* Sekcja Wskaźniki Matematyczne z Tooltipami */}
             {config.diagnosis_type === 'Wskaźniki' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', background: '#2a2a2a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
                 <h4 style={{ margin: '0 0 10px 0', color: '#ffeb3b', borderBottom: '1px solid #444', paddingBottom: '5px' }}>
-                Inteligentna Analiza Statystyczna
+                Inteligentna Analiza Statystyczna (Reguła 3-Sigma)
                 </h4>
                 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                {/* MAE - Kalibracja */}
+                
                 <div style={{ background: '#222', padding: '10px', borderRadius: '4px', borderLeft: '3px solid #00bcd4' }}>
-                    <strong style={{ color: '#00bcd4', fontSize: '0.85rem' }}>📍 Kalibracja/Offset (MAE)</strong>
-                    <input 
-                    type="number" step="0.001" value={config.mae_threshold || 0.5} 
-                    onChange={e => handleChange('mae_threshold', Number(e.target.value))} 
-                    style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} 
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <strong style={{ color: '#00bcd4', fontSize: '0.85rem' }}>📍 Skalar MAE (Kalibracja)</strong>
+                      <span title="Mnożnik dla progu bazowego wyliczonego z reguły 3-Sigma. Wartość 1.0 oznacza domyślny, bezpieczny limit szumu maszyny." style={{ cursor: 'help', color: '#00bcd4' }}>ⓘ</span>
+                    </div>
+                    <input type="number" step="0.1" value={config.mae_threshold} onChange={e => handleChange('mae_threshold', Number(e.target.value))} style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} />
                 </div>
 
-                {/* MSE - Drgania */}
                 <div style={{ background: '#222', padding: '10px', borderRadius: '4px', borderLeft: '3px solid #9c27b0' }}>
-                    <strong style={{ color: '#9c27b0', fontSize: '0.85rem' }}>📳 Drgania/Oscylacje (MSE)</strong>
-                    <input 
-                    type="number" step="0.001" value={config.mse_threshold || 1.0} 
-                    onChange={e => handleChange('mse_threshold', Number(e.target.value))} 
-                    style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} 
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <strong style={{ color: '#9c27b0', fontSize: '0.85rem' }}>📳 Skalar MSE (Drgania)</strong>
+                      <span title="Mnożnik dla progu bazowego wyliczonego z reguły 3-Sigma. Wartość 1.0 oznacza brak ingerencji w próg." style={{ cursor: 'help', color: '#9c27b0' }}>ⓘ</span>
+                    </div>
+                    <input type="number" step="0.1" value={config.mse_threshold} onChange={e => handleChange('mse_threshold', Number(e.target.value))} style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} />
                 </div>
 
-                {/* IAE - Zużycie */}
                 <div style={{ background: '#222', padding: '10px', borderRadius: '4px', borderLeft: '3px solid #ff9800' }}>
-                    <strong style={{ color: '#ff9800', fontSize: '0.85rem' }}>⚙️ Zużycie/Opory (IAE)</strong>
-                    <input 
-                    type="number" value={config.iae_threshold || 50} 
-                    onChange={e => handleChange('iae_threshold', Number(e.target.value))} 
-                    style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} 
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <strong style={{ color: '#ff9800', fontSize: '0.85rem' }}>⚙️ Skalar IAE (Zużycie)</strong>
+                      <span title="Mnożnik dla progu bazowego wyliczonego z reguły 3-Sigma. System automatycznie dopasuje ten próg do długości trwania przejazdu." style={{ cursor: 'help', color: '#ff9800' }}>ⓘ</span>
+                    </div>
+                    <input type="number" step="0.1" value={config.iae_threshold} onChange={e => handleChange('iae_threshold', Number(e.target.value))} style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} />
                 </div>
 
-                {/* ISE - Kolizje */}
                 <div style={{ background: '#222', padding: '10px', borderRadius: '4px', borderLeft: '3px solid #f44336' }}>
-                    <strong style={{ color: '#f44336', fontSize: '0.85rem' }}>💥 Kolizje/Szarpnięcia (ISE)</strong>
-                    <input 
-                    type="number" value={config.ise_threshold || 100} 
-                    onChange={e => handleChange('ise_threshold', Number(e.target.value))} 
-                    style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} 
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <strong style={{ color: '#f44336', fontSize: '0.85rem' }}>💥 Skalar ISE (Kolizje)</strong>
+                      <span title="Mnożnik dla progu bazowego wyliczonego z reguły 3-Sigma. System automatycznie dopasuje ten próg do długości trwania przejazdu." style={{ cursor: 'help', color: '#f44336' }}>ⓘ</span>
+                    </div>
+                    <input type="number" step="0.1" value={config.ise_threshold} onChange={e => handleChange('ise_threshold', Number(e.target.value))} style={{ width: '100%', padding: '6px', background: '#333', color: '#fff', border: '1px solid #555', marginTop: '5px' }} />
                 </div>
+                
                 </div>
             </div>
             )}

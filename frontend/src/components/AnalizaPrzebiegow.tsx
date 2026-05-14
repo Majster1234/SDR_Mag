@@ -300,13 +300,49 @@ const RobotPlayer3D = ({ trajectory, displayedData, testData, playbackIndex, set
     </div>
   );
 };
+
+const paramStyle: React.CSSProperties = {
+  background: '#1a1a1a', padding: '6px 10px', borderRadius: '4px', 
+  border: '1px solid #333', fontSize: '0.8rem', color: '#bbb'
+};
+
+const SignalStatsTable = ({ title, stats, unit, color }: any) => {
+  if (!stats) return null;
+  const rowStyle = { borderBottom: '1px solid #333', fontSize: '0.85rem' };
+  const labelStyle = { padding: '6px', color: '#aaa', textAlign: 'left' as const };
+  const valStyle = { padding: '6px', textAlign: 'right' as const, fontWeight: 'bold', color: '#fff' };
+
+  return (
+    <div style={{ background: '#111', borderRadius: '8px', padding: '10px', border: `1px solid ${color}44` }}>
+      <h5 style={{ margin: '0 0 10px 0', color: color, borderBottom: `1px solid ${color}66`, paddingBottom: '5px' }}>{title}</h5>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <tbody>
+          <tr style={rowStyle}><td style={labelStyle}>Minimum:</td><td style={valStyle}>{stats.min.toFixed(4)} {unit}</td></tr>
+          <tr style={rowStyle}><td style={labelStyle}>Maximum:</td><td style={valStyle}>{stats.max.toFixed(4)} {unit}</td></tr>
+          <tr style={rowStyle}><td style={labelStyle}>Peak-to-Peak:</td><td style={valStyle}>{stats.peak_to_peak.toFixed(4)} {unit}</td></tr>
+          <tr style={rowStyle}><td style={labelStyle}>Średnia (Mean):</td><td style={valStyle}>{stats.mean.toFixed(4)} {unit}</td></tr>
+          <tr style={rowStyle}><td style={labelStyle}>Wartość RMS:</td><td style={valStyle}>{stats.rms.toFixed(4)} {unit}</td></tr>
+          <tr style={{ ...rowStyle, border: 'none' }}><td style={labelStyle}>Odch. standardowe:</td><td style={valStyle}>{stats.std.toFixed(4)}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const ParamBox = ({ label, value, color }: { label: string, value: any, color: string }) => (
+  <div style={{ background: '#1a1a1a', padding: '8px 12px', borderRadius: '6px', border: '1px solid #333' }}>
+    <span style={{ color: '#888', fontSize: '0.75rem', display: 'block', marginBottom: '2px' }}>{label}</span>
+    <strong style={{ color: color, fontSize: '1.1rem' }}>{value ?? '-'}</strong>
+  </div>
+);
+
 export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: string | null }) => {
   const [robotInfo, setRobotInfo] = useState<any>(null);
   
   // NOWY GŁÓWNY STAN: Wynik obliczeń z Backendu!
   const [diagnosis, setDiagnosis] = useState<any>(null);
   const [testData, setTestData] = useState<any[]>([]); // Tylko po to, by mieć surowy czas dla 3D
-
+  const [showParamsModal, setShowParamsModal] = useState(false);
   const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [selectedColumn, setSelectedColumn] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
@@ -425,22 +461,114 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
       {robotName ? (
         <div style={{ marginTop: '1rem', padding: '1.5rem', border: '1px solid #444', borderRadius: '8px', backgroundColor: '#1a1a1a' }}>
           
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
-            <div style={{ background: '#2a2a2a', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid #00bcd4' }}>
-              <h4 style={{ margin: '0 0 5px 0', color: '#00bcd4' }}>🤖 Dane robota</h4>
-              <p style={{ margin: '5px 0', color: '#aaa' }}>Model: <strong style={{ color: '#fff' }}>{robotInfo?.config?.model || '[Brak]'}</strong></p>
-              <p style={{ margin: '5px 0', color: '#aaa' }}>Lokalizacja: <strong style={{ color: '#fff' }}>{robotInfo?.config?.location || '[Brak]'}</strong></p>
+          
+
+          {/* NAGŁÓWEK RAPORTU: 2 KOLUMNY */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
+            
+            {/* KOLUMNA 1: Informacje o przebiegu (Maszyna + Pliki) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ background: '#2a2a2a', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid #00bcd4' }}>
+                <h4 style={{ margin: '0 0 5px 0', color: '#00bcd4' }}>🤖 Maszyna i Lokalizacja</h4>
+                <p style={{ margin: '5px 0', color: '#aaa', fontSize: '0.9rem' }}>Model: <strong style={{ color: '#fff' }}>{robotInfo?.config?.model || 'Nieokreślony'}</strong></p>
+                <p style={{ margin: '5px 0', color: '#aaa', fontSize: '0.9rem' }}>Lokalizacja: <strong style={{ color: '#fff' }}>{robotInfo?.config?.location || 'Nieokreślona'}</strong></p>
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div style={{ background: '#2a2a2a', padding: '10px', borderRadius: '8px', borderLeft: '4px solid #4caf50' }}>
+                  <h4 style={{ margin: '0 0 5px 0', color: '#4caf50', fontSize: '0.85rem' }}>🟢 Referencja</h4>
+                  <p style={{ margin: '0', color: '#aaa', fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {robotInfo?.ref_file_info?.name || 'Brak pliku'}
+                  </p>
+                </div>
+                <div style={{ background: '#2a2a2a', padding: '10px', borderRadius: '8px', borderLeft: '4px solid #ffeb3b' }}>
+                  <h4 style={{ margin: '0 0 5px 0', color: '#ffeb3b', fontSize: '0.85rem' }}>🟡 Badanie</h4>
+                  <p style={{ margin: '0', color: '#aaa', fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {selectedFilePath?.split(/[/\\]/).pop()}
+                  </p>
+                </div>
+              </div>
             </div>
-            <div style={{ background: '#2a2a2a', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid #4caf50' }}>
-              <h4 style={{ margin: '0 0 5px 0', color: '#4caf50' }}>🟢 Plik referencyjny</h4>
-              <p style={{ margin: '0', color: '#aaa' }}>{robotInfo?.ref_file_info?.name || 'Brak pliku referencyjnego'}</p>
-            </div>
-            <div style={{ background: '#2a2a2a', padding: '1rem', borderRadius: '8px', borderLeft: '4px solid #ffeb3b' }}>
-              <h4 style={{ margin: '0 0 5px 0', color: '#ffeb3b' }}>🟡 Plik badany</h4>
-              <p style={{ margin: '0', color: '#aaa' }}>{isFile ? selectedFilePath?.split(/[/\\]/).pop() : 'Wybierz plik...'}</p>
+
+            {/* KOLUMNA 2: Konfiguracja i Typ Diagnostyki (Synchronizacja 1:1) */}
+            <div style={{ background: '#222', padding: '1.5rem', borderRadius: '8px', border: '1px solid #9c27b0', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>
+                <h4 style={{ margin: 0, color: '#9c27b0' }}>⚙️ Parametry aktywnej diagnozy</h4>
+                <div style={{ background: '#9c27b033', color: '#9c27b0', padding: '2px 8px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid #9c27b0' }}>LIVE SYNC</div>
+              </div>
+
+              {/* Dodajemy informację o wybranym rodzaju rodzaju diagnostyki */}
+              <div style={{ marginBottom: '15px' }}>
+                <span style={{ color: '#aaa', fontSize: '0.85rem' }}>Wybrany rodzaj: </span>
+                <strong style={{ color: '#e91e63', fontSize: '1rem', textTransform: 'uppercase' }}>
+                  {diagnosis?.usedConfig?.diagnosis_type || 'Nieznany'}
+                </strong>
+              </div>
+
+              {diagnosis?.usedConfig ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {diagnosis.usedConfig.diagnosis_type === 'Statystyka' ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <ParamBox 
+                        label="Mnożnik k-Sigma" 
+                        value={`${diagnosis.usedConfig.sigma_multiplier} x`} 
+                        color="#ffeb3b" 
+                      />
+                      {diagnosis.statsData?.calculatedStats?.[selectedColumn] && (
+                        <div style={{ background: '#111', padding: '10px', borderRadius: '6px', border: '1px dashed #444', marginTop: '10px' }}>
+                          <span style={{ fontSize: '0.8rem', color: '#888' }}>Obliczono dla {selectedColumn}:</span>
+                          <div style={{ marginTop: '5px' }}>
+                            <div style={{ color: '#aaa', fontSize: '0.85rem' }}>Sigma (σ): <strong>{diagnosis.statsData.calculatedStats[selectedColumn].sigma.toFixed(5)}</strong></div>
+                            <div style={{ color: '#ffeb3b', fontSize: '0.85rem' }}>Limit tunelu: <strong>± {diagnosis.statsData.calculatedStats[selectedColumn].limit.toFixed(5)}</strong></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ):
+                  diagnosis.usedConfig.diagnosis_type === 'Wskaźniki' ? (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <div style={paramStyle}>📍 Skalar MAE: <strong>{diagnosis.usedConfig.mae_threshold}x</strong></div>
+                        <div style={paramStyle}>📳 Skalar MSE: <strong>{diagnosis.usedConfig.mse_threshold}x</strong></div>
+                        <div style={paramStyle}>⚙️ Skalar IAE: <strong>{diagnosis.usedConfig.iae_threshold}x</strong></div>
+                        <div style={paramStyle}>💥 Skalar ISE: <strong>{diagnosis.usedConfig.ise_threshold}x</strong></div>
+                      </div>
+
+                      {/* NOWE: Wyświetlanie precyzyjnie wyliczonych progów z Backendu */}
+                      {diagnosis.statsData?.calculatedThresholds && (
+                        <div style={{ marginTop: '5px', padding: '10px', background: '#111', borderRadius: '4px', border: '1px dashed #444' }}>
+                          <span style={{ color: '#aaa', fontSize: '0.8rem', display: 'block', marginBottom: '5px' }}>
+                            Wyliczone limity alarmowe (3σ * skalar) dla osi <strong style={{ color: '#fff' }}>{selectedColumn}</strong>:
+                          </span>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', fontSize: '0.85rem' }}>
+                             <div style={{ color: '#00bcd4' }}>MAE: <strong>{diagnosis.statsData.calculatedThresholds.MAE[selectedColumn]?.toFixed(4)}</strong></div>
+                             <div style={{ color: '#9c27b0' }}>MSE: <strong>{diagnosis.statsData.calculatedThresholds.MSE[selectedColumn]?.toFixed(4)}</strong></div>
+                             <div style={{ color: '#ff9800' }}>IAE: <strong>{diagnosis.statsData.calculatedThresholds.IAE[selectedColumn]?.toFixed(2)}</strong></div>
+                             <div style={{ color: '#f44336' }}>ISE: <strong>{diagnosis.statsData.calculatedThresholds.ISE[selectedColumn]?.toFixed(2)}</strong></div>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : diagnosis.usedConfig.diagnosis_type === 'Odchylenie (offsetowe)' ? (
+                    <>
+                      <div style={paramStyle}>Offset A [°]: <strong>{diagnosis.usedConfig.a_offset_threshold}</strong></div>
+                      <div style={paramStyle}>Offset Cur [%]: <strong>{diagnosis.usedConfig.cur_offset_threshold}</strong></div>
+                      <div style={{ ...paramStyle, gridColumn: '1/-1', color: '#f44336' }}>Próg błędu: <strong>{diagnosis.usedConfig.max_violation_threshold}%</strong></div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={paramStyle}>Tol. A [%]: <strong>{diagnosis.usedConfig.a_deviation_threshold}</strong></div>
+                      <div style={paramStyle}>Tol. Cur [%]: <strong>{diagnosis.usedConfig.cur_deviation_threshold}</strong></div>
+                      <div style={paramStyle}>Dead. A [°]: <strong>{diagnosis.usedConfig.a_deadband_threshold}</strong></div>
+                      <div style={paramStyle}>Dead. Cur [%]: <strong>{diagnosis.usedConfig.cur_deadband_threshold}</strong></div>
+                    </>
+                  )}
+                </div>
+              ) : (
+                <p style={{ color: '#555', fontStyle: 'italic', fontSize: '0.85rem' }}>Czekam na dane obliczeniowe...</p>
+              )}
             </div>
           </div>
-
           {combinedData.length > 0 && isFile && (
             <>
               {statsData && (
@@ -461,68 +589,69 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                         </tr>
                       </thead>
                       <tbody>
-                        {METRICS.map(metric => (
+                        {METRICS.map(metric => {
+                          return (
                             <tr key={metric}>
-                            <td style={{ 
-                                padding: '8px', 
-                                borderBottom: '1px solid #333', 
-                                borderRight: '1px solid #444', 
-                                textAlign: 'left', 
-                                fontWeight: 'bold', 
-                                color: '#00bcd4' 
-                            }}>
-                                {metric}
-                            </td>
+                            <td style={{ padding: '8px', borderBottom: '1px solid #333', borderRight: '1px solid #444', textAlign: 'left', fontWeight: 'bold', color: '#00bcd4' }}>{metric}</td>
                             
                             {/* Kolumny dla Osi (A) */}
                             {statsData.aCols.map((c: any) => { 
                                 const val = statsData.errors[metric][c]; 
                                 const bgColor = getErrorColor(val, statsData.maxes.A[metric]); 
-                                // Tworzymy przezroczystą wersję koloru dla tła (0.15 opacity)
                                 const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.15)');
+                                const isExceeded = statsData.exceededLimits?.[metric]?.[c] || false;
                                 
+                                // POBIERAMY PRÓG Z ZASADY 3-SIGM WYLICZONY NA BACKENDZIE
+                                const threshold = statsData.calculatedThresholds?.[metric]?.[c];
+
                                 return (
-                                <td key={c} style={{ 
-                                    padding: '8px', 
-                                    borderBottom: '1px solid #333', 
-                                    borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #444' : 'none' 
-                                }}>
-                                    <div style={{ 
-                                    background: `linear-gradient(180deg, #222 0%, ${lightBg} 100%)`, 
-                                    borderBottom: `4px solid ${bgColor}`, 
-                                    padding: '4px', 
-                                    borderRadius: '4px', 
-                                    fontWeight: 'bold' 
-                                    }}>
-                                    {val.toFixed(5)}
+                                <td key={c} style={{ padding: '8px', borderBottom: '1px solid #333', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #444' : 'none' }}>
+                                    <div style={{ background: `linear-gradient(180deg, #222 0%, ${lightBg} 100%)`, borderBottom: `4px solid ${bgColor}`, padding: '4px', borderRadius: '4px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }}>
+                                      <span>{val.toFixed(5)}</span>
+                                      
+                                      {isExceeded && (
+                                        <span 
+                                          title={`Przekroczono wyliczony limit 3σ: ${threshold?.toFixed(4)}`} 
+                                          style={{ cursor: 'help', fontSize: '1.1rem', filter: 'drop-shadow(0 0 5px rgba(255, 235, 59, 0.8))' }}
+                                        >
+                                          ⚠️
+                                        </span>
+                                      )}
                                     </div>
                                 </td>
                                 ); 
                             })}
 
-                            {/* Kolumny dla Prądów (Cur) */}
                             {statsData.curCols.map((c: any) => { 
                                 const val = statsData.errors[metric][c]; 
-                                const bgColor = getErrorColor(val, statsData.maxes.Cur[metric]); 
+                                const bgColor = getErrorColor(val, statsData.maxes.A[metric]); 
                                 const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.15)');
+                                const isExceeded = statsData.exceededLimits?.[metric]?.[c] || false;
                                 
+                                // POBIERAMY PRÓG Z ZASADY 3-SIGM WYLICZONY NA BACKENDZIE
+                                const threshold = statsData.calculatedThresholds?.[metric]?.[c];
+
                                 return (
-                                <td key={c} style={{ padding: '8px', borderBottom: '1px solid #333' }}>
-                                    <div style={{ 
-                                    background: `linear-gradient(180deg, #222 0%, ${lightBg} 100%)`, 
-                                    borderBottom: `4px solid ${bgColor}`, 
-                                    padding: '4px', 
-                                    borderRadius: '4px', 
-                                    fontWeight: 'bold' 
-                                    }}>
-                                    {val.toFixed(5)}
+                                <td key={c} style={{ padding: '8px', borderBottom: '1px solid #333', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #444' : 'none' }}>
+                                    <div style={{ background: `linear-gradient(180deg, #222 0%, ${lightBg} 100%)`, borderBottom: `4px solid ${bgColor}`, padding: '4px', borderRadius: '4px', fontWeight: 'bold', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' }}>
+                                      <span>{val.toFixed(5)}</span>
+                                      
+                                      {isExceeded && (
+                                        <span 
+                                          title={`Przekroczono wyliczony limit 3σ: ${threshold?.toFixed(4)}`} 
+                                          style={{ cursor: 'help', fontSize: '1.1rem', filter: 'drop-shadow(0 0 5px rgba(255, 235, 59, 0.8))' }}
+                                        >
+                                          ⚠️
+                                        </span>
+                                      )}
                                     </div>
                                 </td>
                                 ); 
                             })}
                             </tr>
-                        ))}
-                        </tbody>
+                          );
+                        })}
+                      </tbody>
                     </table>
                   </div>
                 </div>
@@ -533,6 +662,15 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
               <button onClick={() => setViewMode('detailed')} style={{ padding: '6px 20px', background: viewMode === 'detailed' ? '#e91e63' : 'transparent', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 'bold', transition: 'all 0.2s' }}>🔍 Szczegóły</button>
               <button onClick={() => setViewMode('overview')} style={{ padding: '6px 20px', background: viewMode === 'overview' ? '#e91e63' : 'transparent', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 'bold', transition: 'all 0.2s' }}>📱 Widok wspólny</button>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button 
+              onClick={() => setShowParamsModal(true)}
+              style={{ padding: '5px 12px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+            >
+              📊 Parametry sygnału
+            </button>
+            {/* Istniejący wskaźnik udziału błędów... */}
+          </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '10px' }}>
               <label style={{ color: '#aaa', fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <div onClick={() => setShowTimeMarker(!showTimeMarker)} style={{ width: '40px', height: '20px', background: showTimeMarker ? '#9c27b0' : '#444', borderRadius: '10px', position: 'relative', transition: '0.3s', cursor: 'pointer' }}>
@@ -594,7 +732,26 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
-
+                {/* POPUP: PARAMETRY SYGNAŁU */}
+                {showParamsModal && (
+                  <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                    <div style={{ background: '#222', width: '600px', borderRadius: '12px', border: '1px solid #444', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.8)' }}>
+                      <div style={{ padding: '1rem 1.5rem', background: '#333', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #444' }}>
+                        <h3 style={{ margin: 0, color: '#2196f3' }}>📉 Statystyki sygnału: {selectedColumn}</h3>
+                        <button onClick={() => setShowParamsModal(false)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', fontSize: '1.5rem' }}>✕</button>
+                      </div>
+                      
+                      <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                        <SignalStatsTable title="Sygnał Badany (Surowy)" stats={diagnosis?.statsData?.signalParams?.[selectedColumn]?.raw} unit={unit} color="#ffeb3b" />
+                        <SignalStatsTable title="Różnica (Badany - Referencja)" stats={diagnosis?.statsData?.signalParams?.[selectedColumn]?.diff} unit={unit} color="#ff5722" />
+                      </div>
+                      
+                      <div style={{ padding: '1rem', textAlign: 'right', background: '#1a1a1a' }}>
+                        <button onClick={() => setShowParamsModal(false)} style={{ padding: '8px 20px', background: '#444', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Zamknij</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               <h3 style={{ color: '#ff5722', marginBottom: '0.5rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>Obliczona różnica sygnałów {unit ? `[${unit}]` : ''}</h3>
               <div style={{ height: '220px', background: '#111', padding: '1rem', borderRadius: '8px', border: '1px solid #333', position: 'relative' }}>
                 {showTimeMarker && (

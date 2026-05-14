@@ -27,6 +27,8 @@ class RobotInfoReq(BaseModel):
 
 CONFIG_FILE = os.path.join(ROOT_PATH, "robots_config.json")
 
+
+
 def load_robot_configs():
     if os.path.exists(CONFIG_FILE):
         try:
@@ -336,53 +338,93 @@ def run_diagnosis(req: DiagnoseReq):
         chart_data = {}
         violation_areas = {}
         violation_percents = {}
-        # Dodano strukturę dla MSE
+        statsData = {}
+
         errors = {"MAE": {}, "MSE": {}, "IAE": {}, "ISE": {}}
+        # NOWE: Słownik flag przekroczeń limitów, liczony na backendzie
+        exceeded_limits = {"MAE": {}, "MSE": {}, "IAE": {}, "ISE": {}}
+        # Inicjalizacja słowników na wyliczone dynamicznie progi
+        calculated_thresholds = {"MAE": {}, "MSE": {}, "IAE": {}, "ISE": {}}
         
+        # ZMIANA: Parametry to teraz SKALARY, a nie sztywne progi
+        mae_scalar = safe_float(config.get("mae_threshold"), 1.0)
+        mse_scalar = safe_float(config.get("mse_threshold"), 1.0)
+        iae_scalar = safe_float(config.get("iae_threshold"), 1.0)
+        ise_scalar = safe_float(config.get("ise_threshold"), 1.0)
+        calculated_stats = {}
         for col in cols:
             is_a = col.startswith('A')
             
-            dev_thr = safe_float(config.get('a_deviation_threshold' if is_a else 'cur_deviation_threshold'), 0.0)
-            off_thr = safe_float(config.get('a_offset_threshold' if is_a else 'cur_offset_threshold'), 0.0)
-            deadband = safe_float(config.get('a_deadband_threshold' if is_a else 'cur_deadband_threshold'), 0.05 if is_a else 0.5)
-            
+            # Pobieramy r_vals, t_vals i err
             r_vals = df_ref[col].values
             t_vals = df_test[col].values
-            
             err = t_vals - r_vals
             
-            # Obliczenia z poprawnym 'dt' (w sekundach)
+            # 1. Klasyczne Wskaźniki (Przywracamy twarde progi z konfiguracji)
             errors["MAE"][col] = float(np.abs(err).mean())
-            errors["MSE"][col] = float((err**2).mean()) # NOWE: Obliczanie MSE (Mean Square Error)
+            errors["MSE"][col] = float((err**2).mean())
             errors["IAE"][col] = float(np.sum(np.abs(err) * dt))
             errors["ISE"][col] = float(np.sum((err**2) * dt))
             
-            margin = np.full(min_len, off_thr, dtype=float)
+            if diag_type == 'Wskaźniki':
+                exceeded_limits["MAE"][col] = bool(errors["MAE"][col] > safe_float(config.get("mae_threshold"), 0.5))
+                exceeded_limits["MSE"][col] = bool(errors["MSE"][col] > safe_float(config.get("mse_threshold"), 1.0))
+                exceeded_limits["IAE"][col] = bool(errors["IAE"][col] > safe_float(config.get("iae_threshold"), 50.0))
+                exceeded_limits["ISE"][col] = bool(errors["ISE"][col] > safe_float(config.get("ise_threshold"), 100.0))
+            else:
+                for k in exceeded_limits: exceeded_limits[k][col] = False
+
+            # 2. LOGIKA TUNELU (Dodajemy tryb Statystyka)
             if diag_type == 'Odchylenia':
+                dev_thr = safe_float(config.get('a_deviation_threshold' if is_a else 'cur_deviation_threshold'), 2.0)
+                deadband = safe_float(config.get('a_deadband_threshold' if is_a else 'cur_deadband_threshold'), 0.05)
                 rolling_max = pd.Series(r_vals).abs().rolling(window=11, center=True, min_periods=1).max().values
-                calc_margin = rolling_max * (dev_thr / 100.0)
-                margin = np.maximum(calc_margin, deadband)
+                margin = np.maximum(rolling_max * (dev_thr / 100.0), deadband)
+                
+            elif diag_type == 'Odchylenie (offsetowe)':
+                off_thr = safe_float(config.get('a_offset_threshold' if is_a else 'cur_offset_threshold'), 0.1)
+                margin = np.full(min_len, off_thr, dtype=float)
+                
+            elif diag_type == 'Statystyka':
+                # NOWY TRYB: Zasada k-Sigma (Domyślnie 3)
+                k = safe_float(config.get("sigma_multiplier"), 3.0)
+                std_val = np.std(err)
+                margin = np.full(min_len, k * std_val, dtype=float)
+                
+                # Zapisujemy wyliczone parametry do wyświetlenia na froncie
+                calculated_stats[col] = {
+                    "sigma": float(std_val),
+                    "limit": float(k * std_val)
+                }
+            else:
+                # 3. Wskaźniki matematyczne (brak tunelu na wykresach)
+                margin = np.zeros(min_len, dtype=float)
+            # ----------------------------------------------------------------
                 
             up_limit = r_vals + margin
             low_limit = r_vals - margin
             
-            is_out = (t_vals > up_limit) | (t_vals < low_limit)
-            violation_percents[col] = float(is_out.mean() * 100)
-            
+            # Sprawdzanie przekroczeń tylko w trybach o to opartych
+            if diag_type in ['Odchylenia', 'Odchylenie (offsetowe)','Statystyka']:
+                is_out = (t_vals > up_limit) | (t_vals < low_limit)
+                violation_percents[col] = float(is_out.mean() * 100)
+            else:
+                # W trybie Wskaźników tunel i procent błędu nie istnieją
+                is_out = np.zeros(min_len, dtype=bool)
+                violation_percents[col] = 0.0
+                
+            # 1. SZUKANIE OBSZARÓW BŁĘDÓW (do czerwonych stref na wykresach)
+            out_indices = np.where(is_out)[0]
             areas = []
-            start = None
-            for i, out in enumerate(is_out):
-                if out and start is None:
-                    start = times[i]
-                elif not out and start is not None:
-                    areas.append({"start": float(start), "end": float(times[i])})
-                    start = None
-            if start is not None:
-                areas.append({"start": float(start), "end": float(times[-1])})
+            if len(out_indices) > 0:
+                breaks = np.where(np.diff(out_indices) > 1)[0]
+                starts = np.insert(out_indices[breaks + 1], 0, out_indices[0])
+                ends = np.append(out_indices[breaks], out_indices[-1])
+                for s, e in zip(starts, ends):
+                    areas.append({"start": round(float(times[s]), 3), "end": round(float(times[e]), 3)})
             violation_areas[col] = areas
-            
-            # 4. NAPRAWA WYDAJNOŚCI: 10x szybsza kompresja struktury z Pandas bezpośrednio do słownika w Pythonie
-            #   Wektorowe zaokrąglanie i błyskawiczny eksport przez DataFrame
+
+            # 2. TWORZENIE RAMKI DANYCH (tej której brakowało)
             temp_df = pd.DataFrame({
                 "Time": np.round(times, 3),
                 "Referencja": np.round(r_vals, 4),
@@ -391,8 +433,8 @@ def run_diagnosis(req: DiagnoseReq):
                 "LowerLimit": np.round(low_limit, 4),
                 "Roznica": np.round(err, 4)
             })
-            
-            # to_dict(orient='records') robi dokładnie to samo co List Comprehension, ale w zoptymalizowanym silniku C
+                
+            # 3. FORMATOWANIE DO JSON
             chart_data[col] = temp_df.to_dict(orient='records')
         
         # GLOBALNY WERDYKT
@@ -400,33 +442,29 @@ def run_diagnosis(req: DiagnoseReq):
         worst_axis = ""
         max_error = -1.0
         error_unit = ""
-        failure_reason = "" # NOWE: Wyjaśnienie przyczyny awarii
+        failure_reason = "" 
         
         if diag_type == "Wskaźniki":
-            iae_threshold = safe_float(config.get("iae_threshold"), 50.0)
-            ise_threshold = safe_float(config.get("ise_threshold"), 100.0)
+            # Hierarchia usterek: ISE (Kolizje) > MSE (Drgania) > IAE (Zużycie) > MAE (Kalibracja)
+            metrics_priority = [("ISE", "KOLIZJA / SZARPNIĘCIE"), 
+                                ("MSE", "NIESTABILNOŚĆ / DRGANIA"), 
+                                ("IAE", "ZUŻYCIE MECHANICZNE"), 
+                                ("MAE", "BŁĄD KALIBRACJI")]
             
-            # Sprawdzamy najpierw najpoważniejsze usterki - Szarpnięcia (ISE)
-            for col in cols:
-                if errors["ISE"][col] > ise_threshold:
-                    is_failure = True
-                    worst_axis = col
-                    max_error = errors["ISE"][col]
-                    failure_reason = f"KOLIZJA / SZARPNIĘCIE: Krytyczny pik na osi {col} (ISE = {round(max_error, 2)})"
-                    break # Znaleźliśmy awarię krytyczną, przerywamy
-            
-            # Jeśli nie było szarpnięć, sprawdzamy powolne zużycie (IAE)
-            if not is_failure:
+            for metric, reason_prefix in metrics_priority:
                 for col in cols:
-                    if errors["IAE"][col] > iae_threshold:
+                    if exceeded_limits[metric][col]:
                         is_failure = True
                         worst_axis = col
-                        max_error = errors["IAE"][col]
-                        failure_reason = f"ZUŻYCIE MECHANICZNE: Zwiększone opory na osi {col} (IAE = {round(max_error, 2)})"
+                        max_error = errors[metric][col]
+                        limit_val = calculated_thresholds[metric][col]
+                        failure_reason = f"{reason_prefix}: Przekroczono limit 3σ na osi {col} (Wartość: {round(max_error, 2)} > Limit: {round(limit_val, 2)})"
                         break
+                if is_failure:
+                    break
                         
             if not is_failure:
-                failure_reason = "Wskaźniki w normie"
+                failure_reason = "Wszystkie wskaźniki w normie (poniżej progu 3σ)"
                 
         else:
             # Stara logika dla odchyleń procentowych / offsetowych
@@ -463,10 +501,21 @@ def run_diagnosis(req: DiagnoseReq):
         
         return {
             "globalDiagnosis": global_diag,
-            "statsData": {"errors": errors, "aCols": a_cols, "curCols": cur_cols, "maxes": maxes, "violationPercents": violation_percents},
+            "statsData": {
+                "errors": errors, 
+                "exceededLimits": exceeded_limits, 
+                "calculatedThresholds": calculated_thresholds, # NOWE: Przekazujemy progi na Front
+                "aCols": a_cols, 
+                "curCols": cur_cols, 
+                "maxes": maxes, 
+                "violationPercents": violation_percents,
+                "signalParams": statsData.get("signalParams", {}),
+                "calculatedStats": calculated_stats 
+            },
             "violationAreas": violation_areas,
             "chartData": chart_data,
-            "columns": cols
+            "columns": cols,
+            "usedConfig": config  
         }
         
     except Exception as e:
