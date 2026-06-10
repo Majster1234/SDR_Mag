@@ -9,10 +9,38 @@ export interface LogEntry {
   message: string;
 }
 
-// Funkcja pomocnicza, którą możesz wywołać z KAŻDEGO miejsca w kodzie
+// Funkcja pomocnicza do emitowania logów
 export const emitAppLog = (type: LogType, message: string) => {
   window.dispatchEvent(new CustomEvent('appLog', { detail: { type, message } }));
 };
+
+// --- NOWY ELEMENT: Płaska ikona SVG robaka/pająka ---
+const BugIcon = ({ color }: { color: string }) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    width="22" 
+    height="22" 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke={color} 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round"
+    style={{ transition: 'stroke 0.3s ease' }}
+  >
+    <path d="m8 2 1.88 1.88"/>
+    <path d="M14.12 3.88 16 2"/>
+    <path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/>
+    <path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/>
+    <path d="M12 20v-9"/>
+    <path d="M6.53 9C4.6 8.8 3 7.1 3 5"/>
+    <path d="M17.47 9c1.93-.2 3.53-1.9 3.53-4"/>
+    <path d="M8 14H4"/>
+    <path d="M16 14h4"/>
+    <path d="M9.5 19c-2.3 1.2-4.5 1-4.5 1"/>
+    <path d="M14.5 19c2.3 1.2 4.5 1 4.5 1"/>
+  </svg>
+);
 
 export const Notifications = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -73,36 +101,65 @@ export const Notifications = () => {
     }
   };
 
+  // --- OBLICZANIE KOLORU IKONY NA PODSTAWIE STANU ---
+  const getIconColor = () => {
+    if (unreadCount === 0) return '#4caf50'; // Zielony, gdy wszystko OK (brak powiadomień)
+    const lastLog = logs[0];
+    if (lastLog?.type === 'error') return '#f44336'; // Czerwony przy błędzie
+    if (lastLog?.type === 'warning') return '#ff9800'; // Pomarańczowy przy ostrzeżeniu
+    return '#ccc'; // Standardowy przy info/success
+  };
+
   return (
     <div style={{ position: 'relative' }} ref={popupRef}>
       {/* Przycisk Robaczka */}
       <button 
         onClick={togglePopup}
         style={{
-          background: '#222', border: '1px solid #444', borderRadius: '8px', 
-          padding: '8px 12px', cursor: 'pointer', fontSize: '1.2rem',
-          position: 'relative', display: 'flex', alignItems: 'center', transition: '0.2s'
+          background: '#1a1a1a',          // Ciemne tło
+          border: '2px solid #444',      // Wyraźne, grubsze obramowanie
+          borderRadius: '10px',          // Zaokrąglone rogi (bardziej kwadratowe niż pigułka)
+          padding: '10px',               // Kwadratowy padding
+          cursor: 'pointer', 
+          position: 'relative', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          transition: 'all 0.2s ease',
+          boxShadow: '0 2px 5px rgba(0,0,0,0.3)' // Lekki cień
         }}
         title="Dziennik zdarzeń i błędów"
+        onMouseEnter={e => e.currentTarget.style.borderColor = '#666'} // Jaśniejsze obramowanie przy hover
+        onMouseLeave={e => e.currentTarget.style.borderColor = '#444'}
       >
-        🐛
+        {/* Renderowanie ikony SVG z obliczonym kolorem */}
+        <BugIcon color={getIconColor()} />
+
+        {/* Licznik powiadomień */}
         {unreadCount > 0 && (
           <span style={{
-            position: 'absolute', top: '-5px', right: '-5px', background: '#e91e63',
-            color: 'white', fontSize: '0.7rem', fontWeight: 'bold', padding: '2px 6px',
-            borderRadius: '10px', border: '2px solid #1a1a1a'
+            position: 'absolute', 
+            top: '-6px', 
+            right: '-6px', 
+            background: '#e91e63', // Kolor tła licznika (ciemny róż)
+            color: 'white', 
+            fontSize: '0.7rem', 
+            fontWeight: 'bold', 
+            padding: '2px 6px',
+            borderRadius: '10px', 
+            border: '2px solid #111' // Obramowanie licznika pasujące do paska App
           }}>
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
 
-      {/* Okno Popup */}
+      {/* Okno Popup (pozostaje bez zmian stylistycznych, tylko dodano zIndex) */}
       {isOpen && (
         <div style={{
-          position: 'absolute', top: '120%', right: '0', width: '350px', maxHeight: '500px',
+          position: 'absolute', top: '130%', right: '0', width: '350px', maxHeight: '500px',
           background: '#222', border: '1px solid #444', borderRadius: '8px',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.8)', display: 'flex', flexDirection: 'column', zIndex: 9999
+          boxShadow: '0 10px 30px rgba(0,0,0,0.8)', display: 'flex', flexDirection: 'column', zIndex: 99999 // Bardzo wysoki z-index
         }}>
           {/* Nagłówek Popupu */}
           <div style={{ padding: '10px 15px', borderBottom: '1px solid #444', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#2a2a2a', borderTopLeftRadius: '8px', borderTopRightRadius: '8px' }}>

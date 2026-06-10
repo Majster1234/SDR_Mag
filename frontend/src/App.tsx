@@ -78,8 +78,11 @@ function App() {
 
   return (
     <div style={{ 
-      display: 'flex', height: '100vh', width: '100vw', fontFamily: 'sans-serif',
-      cursor: isResizing ? 'col-resize' : 'default' // Zmiana kursora globalnie podczas ciągnięcia
+      display: 'flex', 
+      height: '100vh', 
+      width: '100%', // ZMIANA Z 100vw na 100%
+      fontFamily: 'sans-serif',
+      cursor: isResizing ? 'col-resize' : 'default' 
     }}>
       <Sidebar 
         treeData={treeData} 

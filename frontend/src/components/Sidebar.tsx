@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { FileNode } from '../types';
-
+import { emitAppLog } from './Notifications';
 const TreeNode = ({ 
   node, highlightedPath, activeModule, selectedFilePath, onFileSelect, onContextMenu , depth=0
 }: { 
@@ -22,6 +22,8 @@ const TreeNode = ({
   const isPreviewMode = activeModule === 'podglad_danych';
   const isAnalysisMode = activeModule === 'analiza_przebiegow';
   const isRobotFolder = node.type === 'folder' && depth === 0;
+  
+
 
   useEffect(() => {
     if (node.type === 'folder' && isPartOfHighlightedPath) setIsOpen(true);
@@ -124,6 +126,18 @@ export const Sidebar = ({
   const [newRobotName, setNewRobotName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   
+  const [heartbeatTick, setHeartbeatTick] = useState(0);
+
+  useEffect(() => {
+    emitAppLog('info', 'Zainicjowano animowany wskaźnik aktywności (Heartbeat) głównego wątku UI.');
+    
+    // Uderzenie serca co 500ms - napędza obrót trójkąta
+    const interval = setInterval(() => {
+      setHeartbeatTick(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, path: string } | null>(null);
 
   useEffect(() => {
@@ -211,9 +225,30 @@ export const Sidebar = ({
 
   return (
     <div style={{ width: `${width}px`, backgroundColor: '#1e1e1e', padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-      <h3 style={{ color: '#646cff', borderBottom: '1px solid #444', paddingBottom: '0.5rem', marginTop: 0 }}>🤖 Roboty</h3>
       
+      <h3 style={{ color: '#646cff', borderBottom: '1px solid #444', paddingBottom: '0.5rem', marginTop: 0 }}> Roboty</h3>
+ 
       <div style={{ display: 'flex', gap: '5px', marginTop: '10px', marginBottom: '15px' }}>
+             {/* ANIMOWANY TRÓJKĄT DIAGNOSTYCZNY */}
+          <svg 
+            width="30" height="30" viewBox="0 0 24 24" fill="none" 
+            strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+            style={{ 
+              // Mechanizm serca: obrót o 120 stopni co każde tyknięcie JS
+              transform: `rotate(${heartbeatTick * 120}deg)`, 
+              transition: 'transform 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55)' // Lekki efekt sprężystości (bounce)
+            }}
+          >
+            {/* Krawędź 1 */}
+            <path d="M12 3 L21 18" stroke={heartbeatTick % 3 === 0 ? '#ffffff' : '#333'} style={{ transition: 'stroke 0.3s' }} />
+            {/* Krawędź 2 */}
+            <path d="M21 18 L3 18" stroke={heartbeatTick % 3 === 1 ? '#ffffff' : '#333'} style={{ transition: 'stroke 0.3s' }} />
+            {/* Krawędź 3 */}
+            <path d="M3 18 L12 3" stroke={heartbeatTick % 3 === 2 ? '#ffffff' : '#333'} style={{ transition: 'stroke 0.3s' }} />
+            
+            {/* Kropka w środku */}
+            {/* <circle cx="12" cy="13" r="1.5" fill={heartbeatTick % 2 === 0 ? '#ffffff' : '#444'} style={{ transition: 'fill 0.2s' }} /> */}
+          </svg>
         <input type="text" value={newRobotName} onChange={(e) => setNewRobotName(e.target.value)} placeholder="Nazwa robota..." style={{ flex: 1, padding: '5px 8px', borderRadius: '4px', border: '1px solid #555', backgroundColor: '#2a2a2a', color: 'white' }} onKeyDown={(e) => e.key === 'Enter' && handleAddRobot()} />
         <button onClick={handleAddRobot} disabled={isAdding || !newRobotName.trim()} style={{ padding: '5px 10px', backgroundColor: newRobotName.trim() ? '#4caf50' : '#555', color: 'white', border: 'none', borderRadius: '4px', cursor: newRobotName.trim() ? 'pointer' : 'not-allowed', fontWeight: 'bold' }}>{isAdding ? '...' : '+'}</button>
       </div>
@@ -279,7 +314,7 @@ export const Sidebar = ({
           </button>
         </div>
       )}
-
+    
     </div>
   );
 };
