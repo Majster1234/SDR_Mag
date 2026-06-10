@@ -25,9 +25,58 @@ class FileDataReq(BaseModel):
 class RobotInfoReq(BaseModel):
     robot_name: str
 
+class FileStatusReq(BaseModel):
+    path: str
+    status: str
+
+class SaveAutoDiagReq(BaseModel):
+    robot_name: str
+    test_file_path: str    
 CONFIG_FILE = os.path.join(ROOT_PATH, "robots_config.json")
 
 
+
+@router.post("/api/file/save-auto-diagnosis")
+def save_auto_diagnosis(req: SaveAutoDiagReq):
+    try:
+        # 1. Uruchamiamy diagnostykę, aby pobrać werdykt systemu
+        diag_result = run_diagnosis(DiagnoseReq(robot_name=req.robot_name, test_file_path=req.test_file_path))
+        
+        if "error" in diag_result:
+            raise HTTPException(status_code=400, detail=diag_result["error"])
+            
+        global_diag = diag_result.get("globalDiagnosis", {})
+        is_failure = global_diag.get("isFailure", False)
+        
+        # 2. Mapowanie na konkretne klasy awarii na podstawie komunikatów z systemu
+        if not is_failure:
+            auto_label = "OK"
+        else:
+            reason = global_diag.get("failureReason", "AWARIA")
+            if "KOLIZJA" in reason:
+                auto_label = "KOLIZJA"
+            elif "DRGANIA" in reason or "NIESTABILNOŚĆ" in reason:
+                auto_label = "DRGANIA"
+            elif "ZUŻYCIE" in reason:
+                auto_label = "ZUŻYCIE"
+            elif "KALIBRACJI" in reason:
+                auto_label = "BŁĄD_KALIBRACJI"
+            else:
+                auto_label = "AWARIA"
+
+        # 3. Zapis statusu do pliku CSV
+        full_path = os.path.join(ROOT_PATH, req.test_file_path)
+        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+            first_line = f.readline()
+            sep = ';' if ';' in first_line else ','
+
+        df = pd.read_csv(full_path, sep=sep, engine='python')
+        df['Auto_Label'] = auto_label
+        df.to_csv(full_path, sep=sep, index=False)
+        
+        return {"message": "Zapisano diagnozę automatyczną", "auto_label": auto_label}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 def load_robot_configs():
     if os.path.exists(CONFIG_FILE):
@@ -109,6 +158,18 @@ async def upload_file(file: UploadFile = File(...)):
     
     with open(file_location, "wb+") as file_object:
         file_object.write(await file.read())
+        
+    # NOWE: Zapewnienie istnienia kolumny Auto_Label przy wgrywaniu pliku
+    try:
+        with open(file_location, 'r', encoding='utf-8', errors='ignore') as f:
+            first_line = f.readline()
+            sep = ';' if ';' in first_line else ','
+        df = pd.read_csv(file_location, sep=sep, engine='python')
+        if 'Auto_Label' not in df.columns:
+            df['Auto_Label'] = ""
+            df.to_csv(file_location, sep=sep, index=False)
+    except Exception:
+        pass
     
     with open(file_location, "r", encoding="utf-8", errors="ignore") as f:
         content_preview = f.read(200)
@@ -178,7 +239,7 @@ def calculate_kinematics(req: KinematicsReq):
             T2 = T1 @ Tx(a1) @ Ry(q[1])
             T3 = T2 @ Tz(a2) @ Ry(q[2])
             T4 = T3 @ Tx(a3) @ Tz(d4) @ Rx(q[3])
-            T5 = T4 @ Rx(-q[4])
+            T5 = T4 @ Rx(q[4])
             T6 = T5 @ Rz(q[5]) @ Tx(d6)
             
             # Ekstrakcja pozycji (X, Y, Z) z macierzy
@@ -247,11 +308,12 @@ def get_robot_info(req: RobotInfoReq):
                         duration = float(df['Time'].iloc[-1] - df['Time'].iloc[0]) / 1000.0
                 except Exception:
                     pass # Zignoruj błąd z Pandas, zwrócimy chociaż datę
-                    
+                rel_ref_path = os.path.join(BASE_DIR, req.robot_name, "Przebieg_referencyjny", ref_file_name).replace("\\", "/")
                 ref_file_info = {
                     "name": ref_file_name,
                     "record_date": record_date,
-                    "duration": duration
+                    "duration": duration,
+                    "path": rel_ref_path
                 }
             except Exception:
                 pass
@@ -276,6 +338,31 @@ def safe_float(val, default=0.0):
         return float(val) if val is not None else default
     except (ValueError, TypeError):
         return default
+
+@router.post("/api/file/set-status")
+def set_file_status(req: FileStatusReq):
+    full_path = os.path.join(ROOT_PATH, req.path)
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="Plik nie istnieje na dysku.")
+
+    try:
+        # Odczyt separatora
+        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+            first_line = f.readline()
+            sep = ';' if ';' in first_line else ','
+
+        # Wczytujemy plik
+        df = pd.read_csv(full_path, sep=sep, engine='python')
+        
+        # Tworzymy lub nadpisujemy kolumnę Label
+        df['Label'] = req.status
+        
+        # Zapisujemy plik zachowując oryginalny separator, bez indeksów
+        df.to_csv(full_path, sep=sep, index=False)
+
+        return {"message": f"Status zaktualizowany na {req.status}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Błąd zapisu: {str(e)}")
 
 @router.post("/api/diagnose")
 def run_diagnosis(req: DiagnoseReq):
@@ -314,7 +401,7 @@ def run_diagnosis(req: DiagnoseReq):
                 df[c] = pd.to_numeric(df[c].str.replace(',', '.'), errors='coerce')
             df.fillna(0, inplace=True)
             
-        cols = [c for c in df_ref.columns if c.startswith('A') or c.startswith('Cur')]
+        cols = [c for c in df_ref.columns if (c.startswith('A') and c != 'Auto_Label') or c.startswith('Cur')]
         cols.sort(key=lambda x: (x.startswith('Cur'), x))
         
         min_len = min(len(df_ref), len(df_test))

@@ -18,7 +18,6 @@ const TreeNode = ({
   const isPartOfHighlightedPath = highlightedPath !== null && normalizedHighlighted.startsWith(normalizedNodePath);
   const isSelected = selectedFilePath !== null && normalizedNodePath === normalizedSelected;
   
-  // NOWE: Rozpoznawanie trybu konfiguracji
   const isConfigMode = activeModule === 'konfiguracja';
   const isPreviewMode = activeModule === 'podglad_danych';
   const isAnalysisMode = activeModule === 'analiza_przebiegow';
@@ -31,7 +30,6 @@ const TreeNode = ({
   const glowStyle = isPartOfHighlightedPath ? { textShadow: '0 0 10px #4caf50', color: '#a8ffca', transition: 'all 0.5s' } : { transition: 'all 0.5s' };
 
   if (node.type === 'folder') {
-    // NOWE: Podświetlamy robota również w module konfiguracji
     const isSelectedRobot = (isAnalysisMode || isConfigMode) && selectedFilePath && selectedFilePath.startsWith(node.path);
     const folderGlow = isSelectedRobot 
       ? { textShadow: '0 0 10px #e91e63', color: '#ff80ab', transition: 'all 0.5s' } 
@@ -42,7 +40,6 @@ const TreeNode = ({
         <div 
           onClick={() => {
             setIsOpen(!isOpen);
-            // NOWE: Pozwalamy na wybranie robota w trybie analizy ORAZ konfiguracji
             if ((isAnalysisMode || isConfigMode) && isRobotFolder) {
               onFileSelect(node.path);
             }
@@ -58,26 +55,61 @@ const TreeNode = ({
     );
   }
 
-  // Plik (tutaj dodajemy onContextMenu!)
+  // Zaktualizowany render pliku z kolorami statusów i ikonami
+  const getAutoLabelBadge = (status?: string) => {
+    if (!status || status === "") return null;
+    
+    const badgeStyle: React.CSSProperties = {
+      fontSize: '0.65rem',
+      padding: '2px 6px',
+      borderRadius: '3px',
+      fontWeight: 'bold',
+      marginLeft: '8px',
+      textTransform: 'uppercase'
+    };
+    
+    if (status === 'OK') {
+      return <span style={{ ...badgeStyle, backgroundColor: '#4caf5022', color: '#4caf50', border: '1px solid #4caf5044' }}>SYS: OK</span>;
+    }
+    // Wyświetla konkretną klasę błędu (KOLIZJA, DRGANIA itp.) na czerwono
+    return <span style={{ ...badgeStyle, backgroundColor: '#f4433622', color: '#f44336', border: '1px solid #f4433644' }}>SYS: {status}</span>;
+  };
+
   return (
     <div 
       onClick={() => (isPreviewMode || isAnalysisMode) && onFileSelect(node.path)}
       onContextMenu={(e) => {
-        e.preventDefault(); // Blokujemy standardowe menu Windows/Przeglądarki
+        e.preventDefault(); 
         onContextMenu(e, node.path);
       }}
       style={{ 
         marginLeft: '35px', textAlign: 'left', fontSize: '0.9em', marginTop: '3px',
-        color: isSelected ? '#ffeb3b' : (isExactlyHighlighted ? '#a8ffca' : '#aaa'),
-        fontWeight: (isSelected || isExactlyHighlighted) ? 'bold' : 'normal',
-        backgroundColor: isSelected ? 'rgba(255, 235, 59, 0.2)' : (isExactlyHighlighted ? 'rgba(76, 175, 80, 0.2)' : 'transparent'),
-        padding: '2px 5px', borderRadius: '4px', display: 'inline-block',
+        backgroundColor: isSelected ? 'rgba(255, 235, 59, 0.15)' : (isExactlyHighlighted ? 'rgba(76, 175, 80, 0.15)' : 'transparent'),
+        padding: '4px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         transition: 'all 0.2s ease',
-        boxShadow: isSelected ? '0 0 8px rgba(255, 235, 59, 0.5)' : (isExactlyHighlighted ? '0 0 12px rgba(76, 175, 80, 0.6)' : 'none'),
+        boxShadow: isSelected ? '0 0 8px rgba(255, 235, 59, 0.3)' : (isExactlyHighlighted ? '0 0 12px rgba(76, 175, 80, 0.4)' : 'none'),
         cursor: (isPreviewMode || isAnalysisMode) ? 'pointer' : 'context-menu'
       }}
     >
-      📄 {node.name} {isExactlyHighlighted && '✨ Nowy!'}
+      {/* LEWA STRONA: Status manualny operatora */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+        {node.status === 'OK' && <span title="Manualny: Poprawny">✅</span>}
+        {node.status === 'AWARIA' && <span title="Manualny: Awaria">⚠️</span>}
+        {!node.status && <span>📄</span>}
+        
+        <span style={{ 
+          color: isSelected ? '#ffeb3b' : (node.status === 'OK' ? '#4caf50' : node.status === 'AWARIA' ? '#f44336' : (isExactlyHighlighted ? '#a8ffca' : '#aaa')),
+          fontWeight: (isSelected || isExactlyHighlighted || node.status) ? 'bold' : 'normal',
+          textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap'
+        }}>
+          {node.name}
+        </span>
+      </div>
+
+      {/* PRAWA STRONA: Werdykt automatyczny z systemu */}
+      <div style={{ flexShrink: 0 }}>
+        {getAutoLabelBadge((node as any).auto_status)}
+      </div>
     </div>
   );
 };
@@ -92,10 +124,14 @@ export const Sidebar = ({
   const [newRobotName, setNewRobotName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   
-  // STAN MENU KONTEKSTOWEGO
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, path: string } | null>(null);
 
-  // Ukrywa menu po kliknięciu gdziekolwiek w ekran
+  useEffect(() => {
+  const handleRefresh = () => fetchTree();
+  window.addEventListener('refreshFileTree', handleRefresh);
+  return () => window.removeEventListener('refreshFileTree', handleRefresh);
+  }, [fetchTree]);
+
   useEffect(() => {
     const handleClick = () => setContextMenu(null);
     document.addEventListener('click', handleClick);
@@ -124,7 +160,21 @@ export const Sidebar = ({
     setContextMenu({ x: e.clientX, y: e.clientY, path });
   };
 
-  // Akcje Menu Kontekstowego
+  // NOWA FUNKCJA: Zmiana statusu
+  const actionSetStatus = async (path: string, status: string) => {
+    try {
+      await fetch('http://127.0.0.1:8000/api/file/set-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, status })
+      });
+      fetchTree(); // Odśwież drzewko, by pokazać nowe kolory
+      setContextMenu(null);
+    } catch (err) {
+      console.error("Błąd aktualizacji statusu", err);
+    }
+  };
+
   const actionDelete = async (path: string) => {
     if (!confirm("Czy na pewno chcesz usunąć ten plik?")) return;
     try {
@@ -133,7 +183,6 @@ export const Sidebar = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path })
       });
-      // Jeśli usunęliśmy plik, który był wybrany, "odklikujemy" go
       if (selectedFilePath === path) onFileSelect(null as any);
       fetchTree();
     } catch (err) {
@@ -152,8 +201,8 @@ export const Sidebar = ({
         const error = await res.json();
         alert(error.detail || "Nie można ustawić pliku referencyjnego.");
       } else {
-        if (selectedFilePath === path) onFileSelect(null as any); // Resetujemy wybór, bo plik zmienił miejsce
-        fetchTree(); // Odświeżamy drzewko, by pokazać rotację
+        if (selectedFilePath === path) onFileSelect(null as any);
+        fetchTree(); 
       }
     } catch (err) {
       console.error(err);
@@ -175,17 +224,45 @@ export const Sidebar = ({
         ))}
       </div>
 
-      {/* RENDEROWANIE MENU KONTEKSTOWEGO */}
+      {/* ROZBUDOWANE MENU KONTEKSTOWE */}
       {contextMenu && (
         <div style={{
           position: 'fixed', top: contextMenu.y, left: contextMenu.x, zIndex: 9999,
           backgroundColor: '#2a2a2a', border: '1px solid #444', borderRadius: '6px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.5)', padding: '5px 0', minWidth: '200px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)', padding: '5px 0', minWidth: '220px',
           display: 'flex', flexDirection: 'column'
         }}>
+          {/* Opcje zmiany statusu */}
+          <div style={{ fontSize: '0.75rem', color: '#888', padding: '4px 15px', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #444', marginBottom: '4px' }}>
+            Oznacz plik
+          </div>
           <button 
-            onClick={() => actionSetReference(contextMenu.path)}
-            style={{ background: 'transparent', border: 'none', color: '#fff', padding: '10px 15px', textAlign: 'left', cursor: 'pointer', fontSize: '0.9rem' }}
+            onClick={() => actionSetStatus(contextMenu.path, 'OK')}
+            style={{ background: 'transparent', border: 'none', color: '#4caf50', padding: '8px 15px', textAlign: 'left', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#333'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+            ✅ Status: OK
+          </button>
+          
+          <button 
+            onClick={() => actionSetStatus(contextMenu.path, 'AWARIA')}
+            style={{ background: 'transparent', border: 'none', color: '#f44336', padding: '8px 15px', textAlign: 'left', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 'bold' }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#333'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
+          >
+            ⚠️ Status: AWARIA
+          </button>
+
+          <div style={{ height: '1px', backgroundColor: '#444', margin: '4px 0' }} />
+
+          {/* Stare opcje operacji na pliku */}
+          <div style={{ fontSize: '0.75rem', color: '#888', padding: '4px 15px', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '1px solid #444', marginBottom: '4px' }}>
+            Akcje systemu
+          </div>
+          <button 
+            onClick={() => { actionSetReference(contextMenu.path); setContextMenu(null); }}
+            style={{ background: 'transparent', border: 'none', color: '#fff', padding: '8px 15px', textAlign: 'left', cursor: 'pointer', fontSize: '0.9rem' }}
             onMouseEnter={e => e.currentTarget.style.backgroundColor = '#4caf50'}
             onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
           >
@@ -193,8 +270,8 @@ export const Sidebar = ({
           </button>
           
           <button 
-            onClick={() => actionDelete(contextMenu.path)}
-            style={{ background: 'transparent', border: 'none', color: '#f44336', padding: '10px 15px', textAlign: 'left', cursor: 'pointer', fontSize: '0.9rem' }}
+            onClick={() => { actionDelete(contextMenu.path); setContextMenu(null); }}
+            style={{ background: 'transparent', border: 'none', color: '#f44336', padding: '8px 15px', textAlign: 'left', cursor: 'pointer', fontSize: '0.9rem' }}
             onMouseEnter={e => e.currentTarget.style.backgroundColor = '#5c1611'}
             onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}
           >

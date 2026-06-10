@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
 import { getUnit, getErrorColor } from './utils';
-
+import { emitAppLog } from './Notifications';
 type Metric = 'MAE' | 'MSE' | 'IAE' | 'ISE';
 const METRICS: Metric[] = ['MAE', 'MSE', 'IAE', 'ISE'];
 
@@ -45,7 +45,7 @@ const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker,
     </div>
   );
 };
-const PrecalculatedRobot = ({ points }: { points: number[][] }) => {
+const PrecalculatedRobot = ({ points, isGhost = false }: { points: number[][], isGhost?: boolean }) => {
   if (!points || points.length !== 7) return null;
   const Segment = ({ p1, p2, color }: { p1: number[], p2: number[], color: string }) => {
     const v1 = new THREE.Vector3(p1[0], p1[1], p1[2]);
@@ -54,10 +54,15 @@ const PrecalculatedRobot = ({ points }: { points: number[][] }) => {
     if (distance < 0.001) return null;
     const position = v2.clone().add(v1).divideScalar(2);
     const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), v2.clone().sub(v1).normalize());
+    
+    // Ustalanie koloru i przezroczystości dla ducha
+    const materialColor = isGhost ? '#00bcd4' : color;
+    const opacity = isGhost ? 0.25 : 1;
+
     return (
       <mesh position={position} quaternion={quaternion}>
         <cylinderGeometry args={[0.03, 0.03, distance, 12]} />
-        <meshStandardMaterial color={color} />
+        <meshStandardMaterial color={materialColor} transparent={isGhost} opacity={opacity} />
       </mesh>
     );
   };
@@ -66,7 +71,14 @@ const PrecalculatedRobot = ({ points }: { points: number[][] }) => {
     <group rotation={[-Math.PI / 2, 0, 0]}>
       {points.map((p, i) => (
         <Fragment key={i}>
-          <mesh position={[p[0], p[1], p[2]]}><sphereGeometry args={[0.04]} /><meshStandardMaterial color="#ffeb3b" /></mesh>
+          <mesh position={[p[0], p[1], p[2]]}>
+            <sphereGeometry args={[isGhost ? 0.035 : 0.04]} />
+            <meshStandardMaterial 
+              color={isGhost ? '#00bcd4' : '#ffeb3b'} 
+              transparent={isGhost} 
+              opacity={isGhost ? 0.3 : 1} 
+            />
+          </mesh>
           {i < 6 && <Segment p1={p} p2={points[i + 1]} color={colors[i]} />}
         </Fragment>
       ))}
@@ -75,7 +87,7 @@ const PrecalculatedRobot = ({ points }: { points: number[][] }) => {
 };
 
 // --- ZOPTYMALIZOWANY ODTWARZACZ 3D Z IDEALNĄ SYNCHRONIZACJĄ CZASU ---
-const RobotPlayer3D = ({ trajectory, displayedData, testData, playbackIndex, setPlaybackIndex, handleLiveScrub, isTrajectoryLoading }: any) => {
+const RobotPlayer3D = ({ trajectory, refTrajectory, showGhost, setShowGhost, displayedData, testData, playbackIndex, setPlaybackIndex, handleLiveScrub, isTrajectoryLoading }: any) => {
   const [localIndex, setLocalIndex] = useState(playbackIndex || 0);
   const [isDocked, setIsDocked] = useState(false);
 
@@ -244,7 +256,21 @@ const RobotPlayer3D = ({ trajectory, displayedData, testData, playbackIndex, set
             <option value={2.0}>2.0x</option>
             <option value={5.0}>5.0x</option>
           </select>
-
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <h3 style={{ color: '#9c27b0', margin: 0, fontSize: isDocked ? '1rem' : '1.17em', marginRight: '10px' }}>🤖 Bliźniak 3D</h3>
+            
+            {/* Istniejące przyciski Play, Select, Dock... */}
+            
+            <label style={{ color: '#00bcd4', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', marginLeft: '10px' }}>
+              <input 
+                type="checkbox" 
+                checked={showGhost} 
+                onChange={(e) => setShowGhost(e.target.checked)} 
+                style={{ accentColor: '#00bcd4' }}
+              />
+              Pokaż ducha referencji
+            </label>
+          </div>
           <button 
             onClick={() => setIsDocked(!isDocked)}
             style={{
@@ -292,6 +318,9 @@ const RobotPlayer3D = ({ trajectory, displayedData, testData, playbackIndex, set
             <Grid infiniteGrid fadeDistance={10} sectionColor="#444" cellColor="#222" />
             {trajectory && trajectory.length > 0 && (
               <PrecalculatedRobot points={trajectory[actualIndex]} />
+            )}
+            {showGhost && refTrajectory && refTrajectory.length > 0 && refTrajectory[actualIndex] && (
+              <PrecalculatedRobot points={refTrajectory[actualIndex]} isGhost={true} />
             )}
             <OrbitControls makeDefault />
           </Canvas>
@@ -352,14 +381,47 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
   const [playbackIndex, setPlaybackIndex] = useState<number>(0);
   const [trajectory, setTrajectory] = useState<any[]>([]);
+  const [refTrajectory, setRefTrajectory] = useState<any[]>([]); // <--- NOWE
+  const [showGhost, setShowGhost] = useState<boolean>(true); // <--- NOWE
   const [isTrajectoryLoading, setIsTrajectoryLoading] = useState(false);
   const [showTimeMarker, setShowTimeMarker] = useState<boolean>(true);
-  
+  const [isAutoDiagnosing, setIsAutoDiagnosing] = useState(false);
   const mainChartLineRef = useRef<HTMLDivElement>(null);
   const diffChartLineRef = useRef<HTMLDivElement>(null);
+  
 
   const robotName = selectedFilePath ? selectedFilePath.split(/[/\\]/)[1] : '';
   const isFile = selectedFilePath ? selectedFilePath.endsWith('.csv') : false;
+
+  const handleTriggerAutoDiagnosis = async () => {
+          if (!robotName || !selectedFilePath) return;
+          setIsAutoDiagnosing(true);
+          try {
+            const res = await fetch('http://127.0.0.1:8000/api/file/save-auto-diagnosis', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ robot_name: robotName, test_file_path: selectedFilePath })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              emitAppLog('success', `Zakończono auto-diagnostykę. Werdykt zapisany do pliku: ${data.auto_label}`);
+              
+              // Wyzwolenie globalnego eventu do odświeżenia Sidebaru
+              window.dispatchEvent(new CustomEvent('refreshFileTree'));
+              
+              // Odświeżenie obecnego widoku wykresów
+              const resDiag = await fetch('http://127.0.0.1:8000/api/diagnose', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ robot_name: robotName, test_file_path: selectedFilePath })
+              });
+              if (resDiag.ok) setDiagnosis(await resDiag.json());
+            }
+          } catch (err) {
+            console.error(err);
+          } finally {
+            setIsAutoDiagnosing(false);
+          }
+        };
 
   // 1. GŁÓWNY EFEKT: Pobieranie przeliczonych danych z Pythona
   useEffect(() => {
@@ -367,6 +429,12 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
     
     const fetchAllData = async () => {
       setIsLoading(true);
+      // CZYSZCZENIE STANÓW PRZED NOWYM ZAPYTANIEM
+      
+      setDiagnosis(null);
+      //setTestData([]);
+      setRobotInfo(null);
+      
       try {
         // Pobierz info o robocie
         const resInfo = await fetch('http://127.0.0.1:8000/api/robot-info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ robot_name: robotName }) });
@@ -384,35 +452,60 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
         
         if (resDiag.ok) {
           const diagData = await resDiag.json();
-          if (!diagData.error) {
+          // WYSYŁAMY BŁĄD DO ROBACZKA 🐛
+          if (diagData.error) {
+            emitAppLog('error', diagData.error);
+            setDiagnosis(null); // Czyscimy wykresy
+          } else {
             setDiagnosis(diagData);
             setAvailableColumns(diagData.columns);
             if (!selectedColumn) setSelectedColumn(diagData.columns[0]);
             setZoomRange(null);
           }
         }
-      } catch (e) { console.error(e); }
+      } catch (e) { 
+        console.error(e); 
+        emitAppLog('error', "Wystąpił problem z połączeniem z serwerem diagnostycznym.");
+      }
       setIsLoading(false);
     };
     fetchAllData();
   }, [robotName, selectedFilePath]);
 
   // Pobieranie trajektorii 3D
-  useEffect(() => {
-    if (!selectedFilePath) return;
-    const fetchKinematics = async () => {
-      setIsTrajectoryLoading(true);
-      try {
-        const res = await fetch('http://127.0.0.1:8000/api/kinematics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: selectedFilePath }) });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.trajectory) setTrajectory(data.trajectory);
+useEffect(() => {
+  if (!selectedFilePath) return;
+  const fetchKinematics = async () => {
+    setIsTrajectoryLoading(true);
+    //setTrajectory([]);
+    //setRefTrajectory([]);
+    try {
+      // 1. Pobierz trajektorię badaną
+      const res = await fetch('http://127.0.0.1:8000/api/kinematics', { 
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ path: selectedFilePath }) 
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.trajectory) setTrajectory(data.trajectory);
+      }
+
+      // 2. Pobierz trajektorię referencyjną (ducha)
+      if (robotInfo?.ref_file_info?.path) {
+        const resRef = await fetch('http://127.0.0.1:8000/api/kinematics', { 
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify({ path: robotInfo.ref_file_info.path }) 
+        });
+        if (resRef.ok) {
+          const refData = await resRef.json();
+          if (refData.trajectory) setRefTrajectory(refData.trajectory);
         }
-      } catch (e) { console.error(e); }
-      setIsTrajectoryLoading(false);
-    };
-    fetchKinematics();
-  }, [selectedFilePath]);
+      }
+    } catch (e) { console.error(e); }
+    setIsTrajectoryLoading(false);
+  };
+  fetchKinematics();
+}, [selectedFilePath, robotInfo]); // Zależność od robotInfo, bo stamtąd mamy ścieżkę
 
 
   // =====================================================================
@@ -456,6 +549,28 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
     <div style={{ textAlign: 'left' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h2 style={{ color: '#e91e63', margin: 0 }}>📈 Analiza przebiegów</h2>
+        {selectedFilePath && isFile && (
+            <button
+              onClick={handleTriggerAutoDiagnosis}
+              disabled={isAutoDiagnosing}
+              style={{
+                padding: '8px 16px',
+                background: '#9c27b0',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontWeight: 'bold',
+                cursor: isAutoDiagnosing ? 'not-allowed' : 'pointer',
+                boxShadow: '0 0 10px rgba(156, 39, 176, 0.5)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              {isAutoDiagnosing ? '⏳ Analizowanie...' : '🧠 Uruchom Auto-Diagnostykę'}
+            </button>
+          )}
+        
       </div>
       
       {robotName ? (
@@ -834,6 +949,9 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
       {displayedData.length > 0 && isFile && (
         <RobotPlayer3D 
           trajectory={trajectory}
+          refTrajectory={refTrajectory}
+          showGhost={showGhost}
+          setShowGhost={setShowGhost}
           displayedData={displayedData}
           testData={testData}
           playbackIndex={playbackIndex}

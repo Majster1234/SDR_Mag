@@ -18,7 +18,6 @@ def get_directory_tree(path=BASE_DIR):
         entries = sorted(os.listdir(path))
         for entry in entries:
             full_path = os.path.join(path, entry)
-            # Tworzymy ścieżkę do porównania z Reactem (np. Roboty\Robot_1\plik.csv)
             rel_path = os.path.relpath(full_path, start=ROOT_PATH)
             
             if os.path.isdir(full_path):
@@ -29,7 +28,36 @@ def get_directory_tree(path=BASE_DIR):
                     "children": get_directory_tree(full_path)
                 })
             else:
-                tree.append({"name": entry, "type": "file", "path": rel_path})
+                status = None
+                auto_status = None
+                if entry.endswith('.csv'):
+                    try:
+                        with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            header = f.readline().strip()
+                            sep = ';' if ';' in header else ','
+                            headers = [h.strip() for h in header.split(sep)]
+                            
+                            first_data = f.readline().strip()
+                            if first_data:
+                                cols = [c.strip() for c in first_data.split(sep)]
+                                if 'Label' in headers:
+                                    label_idx = headers.index('Label')
+                                    if len(cols) > label_idx:
+                                        status = cols[label_idx]
+                                if 'Auto_Label' in headers:
+                                    auto_idx = headers.index('Auto_Label')
+                                    if len(cols) > auto_idx:
+                                        auto_status = cols[auto_idx]
+                    except Exception:
+                        pass
+                
+                tree.append({
+                    "name": entry, 
+                    "type": "file", 
+                    "path": rel_path, 
+                    "status": status, 
+                    "auto_status": auto_status # <-- Dodatkowe pole automatyczne
+                })
     except Exception:
         pass
     return tree

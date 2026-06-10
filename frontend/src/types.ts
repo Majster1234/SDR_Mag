@@ -3,4 +3,5 @@ export interface FileNode {
   type: 'file' | 'folder';
   path: string;
   children?: FileNode[];
+  status?: string; 
 }

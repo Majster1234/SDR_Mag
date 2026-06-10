@@ -1,6 +1,6 @@
 // MainPanel.tsx
 import { useState } from 'react';
-import { Notifications, type NotificationItem } from './Notifications';
+import { Notifications } from './Notifications';
 
 // Importujemy Twoje nowo wydzielone pliki:
 import { KonfiguracjaRobota } from './KonfiguracjaRobota';
@@ -25,11 +25,11 @@ export const MainPanel = ({ activeModule, setActiveModule, selectedFilePath, sys
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   
-  const [notifications] = useState<NotificationItem[]>([
-    { id: '1', type: 'progress', message: 'Analiza FFT dla pliku przejazd_24.csv w toku...', timestamp: '14:23:10', progress: 68 },
-    { id: '2', type: 'warning', message: 'Wykryto anomalię prądową w osi A3 (Robot_1).', timestamp: '14:20:05' },
-    { id: '3', type: 'error', message: 'Błąd połączenia z serwerem archiwizacji OPC UA.', timestamp: '14:15:00' },
-  ]);
+  // const [notifications] = useState<NotificationItem[]>([
+  //   { id: '1', type: 'progress', message: 'Analiza FFT dla pliku przejazd_24.csv w toku...', timestamp: '14:23:10', progress: 68 },
+  //   { id: '2', type: 'warning', message: 'Wykryto anomalię prądową w osi A3 (Robot_1).', timestamp: '14:20:05' },
+  //   { id: '3', type: 'error', message: 'Błąd połączenia z serwerem archiwizacji OPC UA.', timestamp: '14:15:00' },
+  // ]);
 
   const modules = [
     { id: 'konfiguracja', name: '⚙️ Konfiguracja robota' },
@@ -56,15 +56,13 @@ export const MainPanel = ({ activeModule, setActiveModule, selectedFilePath, sys
         <h1 style={{ margin: 0, fontSize: '1.5rem', color: '#fff' }}>Panel Diagnostyczny</h1>
         
         <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
-          <button onClick={() => setIsNotificationsOpen(!isNotificationsOpen)} style={{ padding: '0.5rem 1rem', fontSize: '1rem', cursor: 'pointer', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '4px', position: 'relative' }}>
-            🔔 {notifications.length > 0 && <span style={{ position: 'absolute', top: '-5px', right: '-5px', background: '#f44336', color: 'white', borderRadius: '50%', padding: '2px 6px', fontSize: '0.7rem' }}>{notifications.length}</span>}
-          </button>
+         <Notifications />
 
           <div style={{ position: 'relative' }}>
             <button onClick={() => setIsMenuOpen(!isMenuOpen)} style={{ padding: '0.5rem 1rem', fontSize: '1rem', cursor: 'pointer', backgroundColor: '#333', color: 'white', border: '1px solid #555', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               🗂️ Moduł: {modules.find(m => m.id === activeModule)?.name} {isMenuOpen ? '▲' : '▼'}
             </button>
-
+            
             {isMenuOpen && (
               <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '5px', backgroundColor: '#2a2a2a', border: '1px solid #444', borderRadius: '4px', zIndex: 1000, width: '250px', display: 'flex', flexDirection: 'column' }}>
                 {modules.map((mod) => (
@@ -78,7 +76,7 @@ export const MainPanel = ({ activeModule, setActiveModule, selectedFilePath, sys
         </div>
       </div>
 
-      <Notifications isOpen={isNotificationsOpen} onClose={() => setIsNotificationsOpen(false)} notifications={notifications} />
+      
 
       <div style={{ flex: 1, padding: '2rem', overflowY: 'auto' }}>
         {systemNotification && <div style={{ backgroundColor: '#ff9800', color: 'black', padding: '1rem', margin: '0 auto 1.5rem auto', maxWidth: '600px', borderRadius: '8px', fontWeight: 'bold', textAlign: 'center' }}>{systemNotification}</div>}
