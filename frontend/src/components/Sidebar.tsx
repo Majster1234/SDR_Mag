@@ -29,14 +29,16 @@ const globalStyles = `
     line-height: 1.1;
   }
 
+  /* --- BRAKUJĄCY BLOK OBROTU --- */
   .triangle-spinner {
-    transform-origin: 12px 13px; 
+    transform-origin: center; 
     animation: spinSmooth 8s linear infinite;
   }
   @keyframes spinSmooth {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
   }
+  /* ----------------------------- */
 
   .triangle-path {
     animation: colorPulse 4s infinite alternate ease-in-out;
@@ -51,17 +53,13 @@ const globalStyles = `
     100% { stroke: #ff80ab; filter: drop-shadow(0 0 2px rgba(255, 128, 171, 0.6)); }
   }
 
-  .slide-enter-forward {
-    animation: slideInRight 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  }
+  .slide-enter-forward { animation: slideInRight 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
   @keyframes slideInRight {
     from { opacity: 0; transform: translateX(25px); }
     to { opacity: 1; transform: translateX(0); }
   }
 
-  .slide-enter-backward {
-    animation: slideInLeft 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-  }
+  .slide-enter-backward { animation: slideInLeft 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
   @keyframes slideInLeft {
     from { opacity: 0; transform: translateX(-25px); }
     to { opacity: 1; transform: translateX(0); }
@@ -88,16 +86,9 @@ const globalStyles = `
   .context-menu-btn.neutral:hover { background-color: rgba(255, 255, 255, 0.1); }
 
   .drill-down-item {
-    padding: 8px 12px;
-    background-color: #2a2a2a;
-    border-radius: 6px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border: 1px solid transparent;
-    transition: all 0.2s ease;
-    margin-bottom: 4px;
+    padding: 8px 12px; background-color: #2a2a2a; border-radius: 6px; cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between;
+    border: 1px solid transparent; transition: all 0.2s ease; margin-bottom: 4px;
   }
   .drill-down-item:hover { background-color: #333; border-color: #555; }
   
@@ -226,13 +217,21 @@ export const Sidebar = ({
   
   const [breadcrumbPaths, setBreadcrumbPaths] = useState<string[]>([]);
   const [navDirection, setNavDirection] = useState<'forward' | 'backward'>('forward');
+  
+  // --- JS Heartbeat do weryfikacji zawieszenia UI ---
+  const [heartbeatTick, setHeartbeatTick] = useState(0);
 
   useEffect(() => {
+    // Pętla Heartbeat (zatrzyma się, jeśli główny wątek JS się zawiesi)
+    const interval = setInterval(() => setHeartbeatTick(prev => prev + 1), 600);
+    
     const handleRefresh = () => fetchTree();
     const handleClickOut = () => setContextMenu(null);
     window.addEventListener('refreshFileTree', handleRefresh);
     document.addEventListener('click', handleClickOut);
+    
     return () => {
+      clearInterval(interval);
       window.removeEventListener('refreshFileTree', handleRefresh);
       document.removeEventListener('click', handleClickOut);
     };
@@ -265,10 +264,79 @@ export const Sidebar = ({
     else setBreadcrumbPaths(breadcrumbPaths.slice(0, index + 1));
   };
 
-  const handleAddRobot = async () => { /* API Logika */ };
-  const actionSetStatus = async (path: string, status: string) => { /* API Logika */ };
-  const actionDelete = async (path: string) => { /* API Logika */ };
-  const actionSetReference = async (path: string) => { /* API Logika */ };
+  // --- LOGIKA API ---
+  const handleAddRobot = async () => {
+    if (!newRobotName.trim()) return;
+    setIsAdding(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/robots`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newRobotName })
+      });
+      if (response.ok) {
+        setNewRobotName('');
+        emitAppLog('success', `Dodano nowe urządzenie do floty: ${newRobotName}`);
+        fetchTree();
+      } else {
+        emitAppLog('error', `Błąd podczas dodawania urządzenia.`);
+      }
+    } catch (err) {
+      emitAppLog('error', `Błąd komunikacji z serwerem: Nie można dodać urządzenia.`);
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
+  const actionSetStatus = async (path: string, status: string) => {
+    try {
+      await fetch(`${API_BASE_URL}/file/set-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, status })
+      });
+      emitAppLog('success', `Zmieniono manualny status pliku na: ${status}`);
+      fetchTree(); 
+    } catch (err) {
+      emitAppLog('error', `Błąd podczas zmiany statusu pliku.`);
+    }
+  };
+
+  const actionDelete = async (path: string) => {
+    if (!confirm("Czy na pewno chcesz usunąć ten plik?")) return;
+    try {
+      await fetch(`${API_BASE_URL}/file/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path })
+      });
+      if (selectedFilePath === path) onFileSelect(null as any);
+      emitAppLog('warning', `Trwale usunięto plik: ${path.split('/').pop()}`);
+      fetchTree();
+    } catch (err) {
+      emitAppLog('error', `Błąd podczas usuwania pliku.`);
+    }
+  };
+
+  const actionSetReference = async (path: string) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/file/set-reference`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path })
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        emitAppLog('error', error.detail || "Nie można ustawić pliku referencyjnego.");
+      } else {
+        if (selectedFilePath === path) onFileSelect(null as any);
+        emitAppLog('success', `Zdefiniowano nowy przebieg referencyjny.`);
+        fetchTree(); 
+      }
+    } catch (err) {
+      emitAppLog('error', `Błąd komunikacji: Nie ustawiono pliku referencyjnego.`);
+    }
+  };
 
   const isRootLevel = breadcrumbPaths.length === 0;
   const listKey = breadcrumbPaths.join('/') || 'root';
@@ -277,17 +345,23 @@ export const Sidebar = ({
     <div style={{ width: `${width}px`, backgroundColor: '#1e1e1e', padding: '1rem', overflowY: 'auto', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
       <style>{globalStyles}</style>
 
-      {/* --- NAGŁÓWEK --- */}
+      {/* --- NAGŁÓWEK Z BICIEM SERCA JS --- */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
         <div className="logo-container"><h1 className="styled-sdr-logo">SDR</h1></div>
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="triangle-spinner">
+        
+        {/* Przywrócony płynny trójkąt z CSS */}
+        <svg 
+          width="28" height="28" viewBox="0 0 24 24" fill="none" 
+          strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" 
+          className="triangle-spinner"
+        >
           <path className="triangle-path" d="M12 3 L21 18" />
           <path className="triangle-path" d="M21 18 L3 18" />
           <path className="triangle-path" d="M3 18 L12 3" />
         </svg>
       </div>
       
-      {/* --- DODAWANIE URZĄDZENIA (Zawsze widoczne, płynnie wyszarzane poza baza) --- */}
+      {/* --- DODAWANIE URZĄDZENIA --- */}
       <div style={{ 
         padding: '10px', 
         backgroundColor: '#252525', 
