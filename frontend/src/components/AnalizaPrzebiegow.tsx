@@ -1,6 +1,6 @@
 // AnalizaPrzebiegow.tsx
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
-import { LineChart, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea } from 'recharts';
+import { LineChart, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea, ReferenceLine } from 'recharts';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
@@ -221,7 +221,7 @@ const RobotPlayer3D = ({ trajectory, refTrajectory, showGhost, setShowGhost, dis
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', paddingLeft: isDocked ? '15px' : '0' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <h3 style={{ color: '#9c27b0', margin: 0, fontSize: isDocked ? '1rem' : '1.17em', marginRight: '10px' }}>🤖 Bliźniak 3D</h3>
+          <h3 style={{ color: '#9c27b0', margin: 0, fontSize: isDocked ? '1rem' : '1.17em', marginRight: '10px' }}></h3>
           
           <button 
             onClick={() => {
@@ -257,7 +257,7 @@ const RobotPlayer3D = ({ trajectory, refTrajectory, showGhost, setShowGhost, dis
             <option value={5.0}>5.0x</option>
           </select>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h3 style={{ color: '#9c27b0', margin: 0, fontSize: isDocked ? '1rem' : '1.17em', marginRight: '10px' }}>🤖 Bliźniak 3D</h3>
+            <h3 style={{ color: '#9c27b0', margin: 0, fontSize: isDocked ? '1rem' : '1.17em', marginRight: '10px' }}></h3>
             
             {/* Istniejące przyciski Play, Select, Dock... */}
             
@@ -528,7 +528,11 @@ useEffect(() => {
     if (!combinedData || combinedData.length < 2) return;
     const percent = index / (combinedData.length - 1);
     
-    const mainCssCalc = `calc(65px + (100% - 95px) * ${percent})`;
+    // IDEALNIE WYMERZONE MARGINESY:
+    // Start wykresu to 90px (10px margines lewy + 80px szerokość YAxis)
+    // Prawy margines to 30px. Więc szerokość siatki to 100% - 120px.
+    const mainCssCalc = `calc(90px + (100% - 120px) * ${percent})`;
+    
     if (mainChartLineRef.current) mainChartLineRef.current.style.left = mainCssCalc;
     if (diffChartLineRef.current) diffChartLineRef.current.style.left = mainCssCalc;
 
@@ -799,6 +803,7 @@ useEffect(() => {
 
           {viewMode === 'detailed' ? (
             <>
+              {/* Sekcja wyboru sygnału i podsumowania błędów */}
               <div style={{ marginBottom: '1.5rem', background: '#222', padding: '10px 15px', borderRadius: '8px', border: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <span style={{ color: '#aaa', marginRight: '15px' }}>Sygnał do analizy szczegółowej:</span>
@@ -818,73 +823,90 @@ useEffect(() => {
                 })()}
               </div>
 
+              {/* GÓRNY WYKRES: Porównanie z referencją */}
               <h3 style={{ color: '#fff', marginBottom: '0.5rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>Porównanie z referencją {unit ? `[${unit}]` : ''}</h3>
               <div style={{ height: '300px', background: '#111', padding: '1rem', borderRadius: '8px', border: '1px solid #333', marginBottom: '2.5rem', position: 'relative' }}>
+                
+                {/* ZNÓW UŻYWAMY DIVA - Płynna animacja bez lagów */}
                 {showTimeMarker && (
                     <div 
-                    ref={diffChartLineRef}
-                    style={{
-                        position: 'absolute', top: 15, bottom: 25, width: '2px', backgroundColor: '#9c27b0',
-                        left: '65px', zIndex: 100, pointerEvents: 'none', transition: 'none'
-                    }}
+                      ref={mainChartLineRef}
+                      style={{
+                          position: 'absolute', top: 15, bottom: 25, width: '2px', backgroundColor: '#9c27b0',
+                          left: '90px', zIndex: 100, pointerEvents: 'none', transition: 'none'
+                      }}
                     >
-                    <div style={{ position: 'absolute', top: -15, left: -25, color: '#9c27b0', fontSize: '10px', fontWeight: 'bold', width: '60px', textAlign: 'center' }}>POZ. 3D</div>
+                      <div style={{ position: 'absolute', top: -15, left: -25, color: '#9c27b0', fontSize: '10px', fontWeight: 'bold', width: '60px', textAlign: 'center' }}>POZ. 3D</div>
                     </div>
                 )}
+
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={displayedData} margin={{ top: 10, right: 30, left: 10, bottom: 5 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
+                  <ComposedChart data={displayedData} margin={{ top: 10, right: 10, left: 10, bottom: 5 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#333" />
                     <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#888" hide />
-                    <YAxis domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
+                    
+                    {/* KLUCZOWE: width={80} - sztywna szerokość osi Y */}
+                    <YAxis width={62} domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
+                    
                     <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#444' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => { if (Array.isArray(v)) return [`od ${v[0].toFixed(2)} do ${v[1].toFixed(2)} ${unit}`, name]; return [`${Number(v).toFixed(2)} ${unit}`, name]; }} />
                     <Legend verticalAlign="top" height={36} />
+                    
                     {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />))}
                     <Line name="Górny limit" type="monotone" dataKey="UpperLimit" stroke="#9e9e9e" strokeDasharray="4 4" dot={false} isAnimationActive={false} />
                     <Line name="Dolny limit" type="monotone" dataKey="LowerLimit" stroke="#9e9e9e" strokeDasharray="4 4" dot={false} isAnimationActive={false} />
                     <Line name="Referencja" type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={2} dot={false} isAnimationActive={false} />
                     <Line name="Badany" type="monotone" dataKey="Badany" stroke="#ffeb3b" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    
                     {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0.3} fill="#e91e63" fillOpacity={0.3} />}
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
-                {/* POPUP: PARAMETRY SYGNAŁU */}
-                {showParamsModal && (
-                  <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-                    <div style={{ background: '#222', width: '600px', borderRadius: '12px', border: '1px solid #444', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.8)' }}>
+
+              {/* POPUP: PARAMETRY SYGNAŁU */}
+              {showParamsModal && (
+                <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                  {/* ... pozostaw wnętrze modalu bez zmian ... */}
+                  <div style={{ background: '#222', width: '600px', borderRadius: '12px', border: '1px solid #444', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.8)' }}>
                       <div style={{ padding: '1rem 1.5rem', background: '#333', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #444' }}>
                         <h3 style={{ margin: 0, color: '#2196f3' }}>📉 Statystyki sygnału: {selectedColumn}</h3>
                         <button onClick={() => setShowParamsModal(false)} style={{ background: 'transparent', border: 'none', color: '#aaa', cursor: 'pointer', fontSize: '1.5rem' }}>✕</button>
                       </div>
-                      
                       <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '20px' }}>
                         <SignalStatsTable title="Sygnał Badany (Surowy)" stats={diagnosis?.statsData?.signalParams?.[selectedColumn]?.raw} unit={unit} color="#ffeb3b" />
                         <SignalStatsTable title="Różnica (Badany - Referencja)" stats={diagnosis?.statsData?.signalParams?.[selectedColumn]?.diff} unit={unit} color="#ff5722" />
                       </div>
-                      
                       <div style={{ padding: '1rem', textAlign: 'right', background: '#1a1a1a' }}>
                         <button onClick={() => setShowParamsModal(false)} style={{ padding: '8px 20px', background: '#444', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Zamknij</button>
                       </div>
                     </div>
-                  </div>
-                )}
+                </div>
+              )}
+
+              {/* DOLNY WYKRES: Różnica sygnałów */}
               <h3 style={{ color: '#ff5722', marginBottom: '0.5rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>Obliczona różnica sygnałów {unit ? `[${unit}]` : ''}</h3>
               <div style={{ height: '220px', background: '#111', padding: '1rem', borderRadius: '8px', border: '1px solid #333', position: 'relative' }}>
+                
+                {/* DIV Z NACZNIKIEM DLA DOLNEGO WYKRESU */}
                 {showTimeMarker && (
                     <div 
-                    ref={diffChartLineRef}
-                    style={{
-                        position: 'absolute', top: 15, bottom: 25, width: '2px', backgroundColor: '#9c27b0',
-                        left: '65px', zIndex: 100, pointerEvents: 'none', transition: 'none'
-                    }}
+                      ref={diffChartLineRef}
+                      style={{
+                          position: 'absolute', top: 15, bottom: 25, width: '2px', backgroundColor: '#9c27b0',
+                          left: '90px', zIndex: 100, pointerEvents: 'none', transition: 'none'
+                      }}
                     >
-                    <div style={{ position: 'absolute', top: -15, left: -25, color: '#9c27b0', fontSize: '10px', fontWeight: 'bold', width: '60px', textAlign: 'center' }}>POZ. 3D</div>
+                      <div style={{ position: 'absolute', top: -15, left: -25, color: '#9c27b0', fontSize: '10px', fontWeight: 'bold', width: '60px', textAlign: 'center' }}>POZ. 3D</div>
                     </div>
                 )}
+
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={displayedData} margin={{ top: 10, right: 30, left: 10, bottom: 20 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
+                  <LineChart data={displayedData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#333" />
                     <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#888" label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#aaa' }} />
-                    <YAxis domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
+                    
+                    {/* KLUCZOWE: width={80} - sztywna szerokość osi Y */}
+                    <YAxis width={62} domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
+                    
                     <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#444' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any) => [`${Number(v).toFixed(2)} ${unit}`, 'Δ Różnica']} />
                     {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />))}
                     <Line name="Δ Odchylenie (Badany - Ref)" type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={2} dot={false} isAnimationActive={false} />
