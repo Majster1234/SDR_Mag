@@ -6,7 +6,7 @@ import { Notifications } from './Notifications';
 import { KonfiguracjaRobota } from './KonfiguracjaRobota';
 import { PodgladDanych } from './PodgladDanych';
 import { AnalizaPrzebiegow } from './AnalizaPrzebiegow';
-
+import { ZarzadzanieAI } from './zarzadzanieAI';
 // --- BARDZO MAŁE MODUŁY (Pozostawione w głównym pliku dla wygody) ---
 const OstatnieOperacje = () => (
   <div style={{ textAlign: 'left', padding: '1rem' }}>
@@ -40,7 +40,7 @@ export const MainPanel = ({ activeModule, setActiveModule, selectedFilePath, sys
       case 'podglad_danych': return <PodgladDanych selectedFilePath={selectedFilePath} />;
       case 'ostatnie_operacje': return <OstatnieOperacje />;
       case 'analiza_przebiegow': return <AnalizaPrzebiegow selectedFilePath={selectedFilePath} />;
-      case 'rezerwa_2': return <Rezerwa numer={2} />;
+      case 'zarzadzanie_ai': return <ZarzadzanieAI />;
       default: return <PodgladDanych selectedFilePath={selectedFilePath} />;
     }
   };

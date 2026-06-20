@@ -10,6 +10,9 @@ from backend.config import BASE_DIR, DEFAULT_ROBOTS, ROOT_PATH
 import math
 import json
 from typing import Optional, Dict, Any 
+from pydantic import BaseModel
+from ml_engine import ml_engine
+
 
 router = APIRouter()
 
@@ -31,10 +34,36 @@ class FileStatusReq(BaseModel):
 
 class SaveAutoDiagReq(BaseModel):
     robot_name: str
-    test_file_path: str    
+    test_file_path: str
+
+# Definiujemy strukturę żądania z frontendu
+class TrainModelRequest(BaseModel):
+    model_name: str
+    folder_path: str
+    reference_path: str
+    window_size: int
+    step_size: int    
+
 CONFIG_FILE = os.path.join(ROOT_PATH, "robots_config.json")
 
+@router.post("/api/ml/train")
+def train_robot_model(req: TrainModelRequest):
+    # Mapujemy ścieżki absolutne względem Twojego katalogu BASE_DIR
+    abs_folder = os.path.join(BASE_DIR, req.folder_path)
+    abs_reference = os.path.join(BASE_DIR, req.reference_path)
+    
+    result = ml_engine.train_windowed_models(
+        model_name=req.model_name,
+        training_folder_path=abs_folder,
+        reference_file_path=abs_reference,
+        window_size=req.window_size,
+        step_size=req.step_size
+    )
+    return result
 
+@router.get("/api/ml/registry")
+def get_ml_models_registry():
+    return ml_engine.get_registry()
 
 @router.post("/api/file/save-auto-diagnosis")
 def save_auto_diagnosis(req: SaveAutoDiagReq):
