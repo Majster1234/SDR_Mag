@@ -31,7 +31,7 @@ export const MainPanel = ({ activeModule, setActiveModule, selectedFilePath, sys
     { id: 'podglad_danych', name: '📊 Podgląd danych' },
     { id: 'ostatnie_operacje', name: '🕒 Ostatnie operacje' },
     { id: 'analiza_przebiegow', name: '📈 Analiza przebiegów' },
-    { id: 'rezerwa_2', name: '📦 Rezerwa 2' },
+    { id: 'zarzadzanie_ai', name: '🧠 Zarządzanie AI' },
   ];
 
   const renderActiveModule = () => {

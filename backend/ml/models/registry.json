@@ -1,4 +1,75 @@
 {
-  "active_model_id": null,
-  "models": []
+    "active_model_id": null,
+    "models": [
+        {
+            "group_id": "group_1781997967",
+            "name": "Model1",
+            "algorithm": "Windowed Isolation Forest",
+            "created_at": "2026-06-21 01:26:13",
+            "files_used_count": 13,
+            "window_size": 30,
+            "step_size": 10,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        },
+        {
+            "group_id": "group_1781998929",
+            "name": "Model_Przejazdy_z_dnia_16_05_26_luzny_chwytak_Bazowy",
+            "algorithm": "Windowed Isolation Forest",
+            "created_at": "2026-06-21 01:42:15",
+            "files_used_count": 13,
+            "window_size": 10,
+            "step_size": 5,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        },
+        {
+            "group_id": "group_1781999626",
+            "name": "model2",
+            "algorithm": "Windowed Isolation Forest",
+            "created_at": "2026-06-21 01:53:51",
+            "files_used_count": 11,
+            "window_size": 15,
+            "step_size": 5,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        }
+    ],
+    "active_model_group_id": "group_1781998929"
 }

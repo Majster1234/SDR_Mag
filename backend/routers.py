@@ -11,7 +11,7 @@ import math
 import json
 from typing import Optional, Dict, Any 
 from pydantic import BaseModel
-from ml_engine import ml_engine
+from backend.ml.ml_engine import ml_engine
 
 
 router = APIRouter()
@@ -44,7 +44,67 @@ class TrainModelRequest(BaseModel):
     window_size: int
     step_size: int    
 
+class TestModelReq(BaseModel):
+    group_id: str
+    axis: str
+    test_file_path: str
+    reference_file_path: str
+
 CONFIG_FILE = os.path.join(ROOT_PATH, "robots_config.json")
+
+
+@router.delete("/api/ml/models/{group_id}")
+def delete_ml_model(group_id: str):
+    return ml_engine.delete_model_group(group_id)
+
+@router.get("/api/ml/model-data-all/{group_id}")
+def get_all_ml_model_visualization(group_id: str):
+    return ml_engine.get_all_model_visualization_data(group_id)
+
+@router.get("/api/ml/model-data/{group_id}/{axis}")
+def get_ml_model_visualization(group_id: str, axis: str):
+    return ml_engine.get_model_visualization_data(group_id, axis)
+
+@router.get("/api/ml/sources")
+def get_ml_sources():
+    sources = []
+    if not os.path.exists(BASE_DIR):
+        return {"sources": []}
+        
+    for item in os.listdir(BASE_DIR):
+        item_path = os.path.join(BASE_DIR, item)
+        if os.path.isdir(item_path):
+            ref_dir = os.path.join(item_path, "Przebieg_referencyjny")
+            refs = []
+            if os.path.exists(ref_dir):
+                refs = [f for f in os.listdir(ref_dir) if f.lower().endswith('.csv')]
+            
+            data_folders = [item] 
+            test_files = [] # <-- NOWOŚĆ: Lista plików do testowania
+            
+            for sub in os.listdir(item_path):
+                sub_path = os.path.join(item_path, sub)
+                if os.path.isdir(sub_path) and sub not in ["Przebieg_referencyjny"]:
+                    data_folders.append(f"{item}/{sub}")
+                    # Pobieranie pojedynczych plików CSV do panelu testowego
+                    for f in os.listdir(sub_path):
+                        if f.lower().endswith('.csv'):
+                            test_files.append(f"{item}/{sub}/{f}")
+            
+            sources.append({
+                "robot_name": item,
+                "data_folders": data_folders,
+                "reference_files": [f"{item}/Przebieg_referencyjny/{r}" for r in refs],
+                "test_files": test_files # <-- Przekazujemy listę do Reacta
+            })
+    return {"sources": sources}
+
+@router.post("/api/ml/test")
+def test_ml_model(req: TestModelReq):
+    # Ścieżki wędrują z Reacta, więc doklejamy je do BASE_DIR
+    abs_test = os.path.join(BASE_DIR, req.test_file_path)
+    abs_ref = os.path.join(BASE_DIR, req.reference_file_path)
+    return ml_engine.evaluate_file(req.group_id, req.axis, abs_test, abs_ref)
 
 @router.post("/api/ml/train")
 def train_robot_model(req: TrainModelRequest):
@@ -766,3 +826,5 @@ def run_batch_diagnosis(req: BatchDiagnoseReq):
     results = sorted(results, key=lambda x: x["file_name"])
     print(f"--- Zakończono. Przekazano {len(results)} plików do tabeli! ---\n")
     return {"batch_results": results}
+
+    
