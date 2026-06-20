@@ -375,7 +375,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [selectedColumn, setSelectedColumn] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'detailed' | 'overview'>('detailed');
+  const [viewMode, setViewMode] = useState<'detailed' | 'combined' | 'batch'>('detailed');
   const [refAreaLeft, setRefAreaLeft] = useState<number | null>(null);
   const [refAreaRight, setRefAreaRight] = useState<number | null>(null);
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
@@ -388,10 +388,125 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const [isAutoDiagnosing, setIsAutoDiagnosing] = useState(false);
   const mainChartLineRef = useRef<HTMLDivElement>(null);
   const diffChartLineRef = useRef<HTMLDivElement>(null);
-  
-
+  const [overrideConfig, setOverrideConfig] = useState<any>(null);
+  const [isSimulating, setIsSimulating] = useState(false);
+  const [batchResults, setBatchResults] = useState<any[] | null>(null);
+  const [isBatchLoading, setIsBatchLoading] = useState(false);
+  const [batchTrendSelection, setBatchTrendSelection] = useState<string>('Ogólny');
   const robotName = selectedFilePath ? selectedFilePath.split(/[/\\]/)[1] : '';
   const isFile = selectedFilePath ? selectedFilePath.endsWith('.csv') : false;
+
+  // Funkcja pomocnicza do aktualizacji pojedynczego parametru w symulacji
+  const updateOverride = (key: string, value: any) => {
+    setOverrideConfig((prev: any) => ({
+        ...(prev || diagnosis?.usedConfig || {}),
+        [key]: value
+    }));
+  };
+
+  // Niezależne wywołanie przeliczenia algorytmów (bez pobierania plików od zera)
+  const handleRecalculate = async (configToUse = overrideConfig) => {
+    setIsLoading(true);
+    emitAppLog('info', 'Uruchomiono przeliczanie analizy z nowymi parametrami (Symulacja)...');
+    try {
+      const resDiag = await fetch('http://127.0.0.1:8000/api/diagnose', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+           robot_name: robotName, 
+           test_file_path: selectedFilePath,
+           override_config: configToUse // Wysyłamy nadpisane parametry!
+        })
+      });
+      if (resDiag.ok) {
+        const diagData = await resDiag.json();
+        if (!diagData.error) {
+          setDiagnosis(diagData);
+          setAvailableColumns(diagData.columns);
+          if (!selectedColumn) setSelectedColumn(diagData.columns[0]);
+          emitAppLog('success', 'Zakończono przeliczanie. Wykresy i limity zostały zaktualizowane.');
+        } else {
+          emitAppLog('error', `Błąd diagnozy: ${diagData.error}`);
+        }
+      }
+    } catch (e) { 
+      emitAppLog('error', 'Błąd komunikacji z serwerem podczas przeliczania.');
+    }
+    setIsLoading(false);
+  };
+
+  
+  // --- FUNKCJA: Analiza Grupowa (Folder) ---
+  const handleBatchAnalysis = async () => {
+    if (!selectedFilePath) return;
+    
+    // NAPRAWA BŁĘDU WINDOWS: Normalizujemy ukośniki przed cięciem tekstu!
+    const normalizedPath = selectedFilePath.replace(/\\/g, '/');
+    const folderPath = normalizedPath.substring(0, normalizedPath.lastIndexOf('/'));
+    
+    setIsBatchLoading(true);
+    emitAppLog('info', `Rozpoczęto grupową analizę folderu: ${folderPath.split('/').pop()}...`);
+    
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/diagnose/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          robot_name: robotName,
+          folder_path: folderPath,
+          override_config: overrideConfig
+        })
+      });
+      
+      if (res.ok) {
+        const data = await res.json();
+        if (data.error) {
+          emitAppLog('error', `Błąd analizy grupowej: ${data.error}`);
+        } else {
+          setBatchResults(data.batch_results);
+          emitAppLog('success', `Ukończono analizę. Przetworzono ${data.batch_results.length} przejazdów.`);
+        }
+      }
+    } catch (err) {
+      emitAppLog('error', 'Błąd komunikacji podczas analizy grupowej.');
+    } finally {
+      setIsBatchLoading(false);
+    }
+  };
+
+  // --- FUNKCJA: Eksport tabeli do CSV ---
+  const exportBatchToCSV = () => {
+    if (!batchResults || batchResults.length === 0) return;
+    
+    // Pobieramy aktywny próg
+    const activeThreshold = overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0;
+
+    let csvContent = "Sygnal / Parametr,";
+    csvContent += batchResults.map((r: any) => r.file_name.replace('.csv', '')).join(",") + "\n";
+
+    csvContent += "Label Manualny,";
+    csvContent += batchResults.map((r: any) => r.manual_label).join(",") + "\n";
+
+    csvContent += "Label Systemu,";
+    csvContent += batchResults.map((r: any) => r.auto_label).join(",") + "\n";
+
+    availableColumns.forEach(col => {
+      csvContent += `${col},`;
+      csvContent += batchResults.map((r: any) => {
+        const val = r.violation_percents[col] || 0;
+        return val.toFixed(2);
+      }).join(",") + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Analiza_Wielokrotna_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    emitAppLog('success', 'Pobrano plik CSV z wynikami analizy.');
+  };
 
   const handleTriggerAutoDiagnosis = async () => {
           if (!robotName || !selectedFilePath) return;
@@ -447,7 +562,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
         // GŁÓWNE ZAPYTANIE: Analiza Diagnostyczna
         const resDiag = await fetch('http://127.0.0.1:8000/api/diagnose', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ robot_name: robotName, test_file_path: selectedFilePath })
+          body: JSON.stringify({ robot_name: robotName, test_file_path: selectedFilePath, override_config: overrideConfig })
         });
         
         if (resDiag.ok) {
@@ -550,6 +665,7 @@ useEffect(() => {
   const unit = getUnit(selectedColumn);
 
   return (
+    
     <div style={{ textAlign: 'left' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h2 style={{ color: '#e91e63', margin: 0 }}>📈 Analiza przebiegów</h2>
@@ -609,80 +725,125 @@ useEffect(() => {
               </div>
             </div>
 
-            {/* KOLUMNA 2: Konfiguracja i Typ Diagnostyki (Synchronizacja 1:1) */}
-            <div style={{ background: '#222', padding: '1.5rem', borderRadius: '8px', border: '1px solid #9c27b0', display: 'flex', flexDirection: 'column' }}>
+{/* KOLUMNA 2: Konfiguracja i Typ Diagnostyki (SYMULACJA) */}
+            <div style={{ background: '#222', padding: '1.5rem', borderRadius: '8px', border: overrideConfig ? '2px solid #ff9800' : '1px solid #9c27b0', display: 'flex', flexDirection: 'column', transition: 'all 0.3s' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', borderBottom: '1px solid #333', paddingBottom: '10px' }}>
-                <h4 style={{ margin: 0, color: '#9c27b0' }}>⚙️ Parametry aktywnej diagnozy</h4>
-                <div style={{ background: '#9c27b033', color: '#9c27b0', padding: '2px 8px', borderRadius: '4px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid #9c27b0' }}>LIVE SYNC</div>
+                <h4 style={{ margin: 0, color: overrideConfig ? '#ff9800' : '#9c27b0' }}>
+                  {overrideConfig ? '⚠️ Parametry SYMULACJI' : '⚙️ Parametry aktywnej diagnozy'}
+                </h4>
+                
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {overrideConfig && (
+                    <button 
+                      onClick={() => { setOverrideConfig(null); setIsSimulating(false); handleRecalculate(null); emitAppLog('warning', 'Zresetowano do parametrów domyślnych robota.'); }}
+                      style={{ background: '#f44336', color: 'white', border: 'none', borderRadius: '4px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      ✕ Resetuj
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => { 
+                      if (isSimulating) handleRecalculate(); 
+                      setIsSimulating(!isSimulating); 
+                    }}
+                    style={{ background: isSimulating ? '#4caf50' : '#333', color: 'white', border: isSimulating ? 'none' : '1px solid #555', borderRadius: '4px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 'bold' }}
+                  >
+                    {isSimulating ? '▶ Przelicz zmiany' : '🔧 Modyfikuj (What-If)'}
+                  </button>
+                </div>
               </div>
 
-              {/* Dodajemy informację o wybranym rodzaju rodzaju diagnostyki */}
-              <div style={{ marginBottom: '15px' }}>
-                <span style={{ color: '#aaa', fontSize: '0.85rem' }}>Wybrany rodzaj: </span>
-                <strong style={{ color: '#e91e63', fontSize: '1rem', textTransform: 'uppercase' }}>
-                  {diagnosis?.usedConfig?.diagnosis_type || 'Nieznany'}
-                </strong>
-              </div>
-
-              {diagnosis?.usedConfig ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {diagnosis.usedConfig.diagnosis_type === 'Statystyka' ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      <ParamBox 
-                        label="Mnożnik k-Sigma" 
-                        value={`${diagnosis.usedConfig.sigma_multiplier} x`} 
-                        color="#ffeb3b" 
-                      />
-                      {diagnosis.statsData?.calculatedStats?.[selectedColumn] && (
-                        <div style={{ background: '#111', padding: '10px', borderRadius: '6px', border: '1px dashed #444', marginTop: '10px' }}>
-                          <span style={{ fontSize: '0.8rem', color: '#888' }}>Obliczono dla {selectedColumn}:</span>
-                          <div style={{ marginTop: '5px' }}>
-                            <div style={{ color: '#aaa', fontSize: '0.85rem' }}>Sigma (σ): <strong>{diagnosis.statsData.calculatedStats[selectedColumn].sigma.toFixed(5)}</strong></div>
-                            <div style={{ color: '#ffeb3b', fontSize: '0.85rem' }}>Limit tunelu: <strong>± {diagnosis.statsData.calculatedStats[selectedColumn].limit.toFixed(5)}</strong></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ):
-                  diagnosis.usedConfig.diagnosis_type === 'Wskaźniki' ? (
+{diagnosis?.usedConfig ? (
+                (() => {
+                  const activeCfg = overrideConfig || diagnosis.usedConfig;
+                  const inputStyle = { background: '#111', color: '#fff', border: '1px solid #444', padding: '4px 8px', width: '80px', borderRadius: '4px', fontSize: '0.9rem' };
+                  
+                  return (
                     <>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                        <div style={paramStyle}>📍 Skalar MAE: <strong>{diagnosis.usedConfig.mae_threshold}x</strong></div>
-                        <div style={paramStyle}>📳 Skalar MSE: <strong>{diagnosis.usedConfig.mse_threshold}x</strong></div>
-                        <div style={paramStyle}>⚙️ Skalar IAE: <strong>{diagnosis.usedConfig.iae_threshold}x</strong></div>
-                        <div style={paramStyle}>💥 Skalar ISE: <strong>{diagnosis.usedConfig.ise_threshold}x</strong></div>
+                      <div style={{ marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{ color: '#aaa', fontSize: '0.85rem' }}>Wybrany rodzaj: </span>
+                        {isSimulating ? (
+                          <select 
+                            value={activeCfg.diagnosis_type || 'Odchylenia'} 
+                            onChange={(e) => updateOverride('diagnosis_type', e.target.value)}
+                            style={{ background: '#111', color: '#fff', border: '1px solid #ff9800', padding: '6px', borderRadius: '4px', flex: 1, outline: 'none' }}
+                          >
+                            <option value="Odchylenia">Odchylenia (Tunel %)</option>
+                            <option value="Odchylenie (offsetowe)">Odchylenia (Offset staly)</option>
+                            <option value="Wskaźniki">Wskaźniki (MAE, ISE...)</option>
+                            <option value="Statystyka">Statystyka (k-Sigma)</option>
+                          </select>
+                        ) : (
+                          <strong style={{ color: overrideConfig ? '#ff9800' : '#e91e63', fontSize: '1rem', textTransform: 'uppercase' }}>
+                            {activeCfg.diagnosis_type || 'Nieznany'}
+                          </strong>
+                        )}
                       </div>
 
-                      {/* NOWE: Wyświetlanie precyzyjnie wyliczonych progów z Backendu */}
-                      {diagnosis.statsData?.calculatedThresholds && (
-                        <div style={{ marginTop: '5px', padding: '10px', background: '#111', borderRadius: '4px', border: '1px dashed #444' }}>
-                          <span style={{ color: '#aaa', fontSize: '0.8rem', display: 'block', marginBottom: '5px' }}>
-                            Wyliczone limity alarmowe (3σ * skalar) dla osi <strong style={{ color: '#fff' }}>{selectedColumn}</strong>:
-                          </span>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', fontSize: '0.85rem' }}>
-                             <div style={{ color: '#00bcd4' }}>MAE: <strong>{diagnosis.statsData.calculatedThresholds.MAE[selectedColumn]?.toFixed(4)}</strong></div>
-                             <div style={{ color: '#9c27b0' }}>MSE: <strong>{diagnosis.statsData.calculatedThresholds.MSE[selectedColumn]?.toFixed(4)}</strong></div>
-                             <div style={{ color: '#ff9800' }}>IAE: <strong>{diagnosis.statsData.calculatedThresholds.IAE[selectedColumn]?.toFixed(2)}</strong></div>
-                             <div style={{ color: '#f44336' }}>ISE: <strong>{diagnosis.statsData.calculatedThresholds.ISE[selectedColumn]?.toFixed(2)}</strong></div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        {activeCfg.diagnosis_type === 'Statystyka' ? (
+                          <>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...paramStyle }}>
+                              <span>Mnożnik k-Sigma (σ):</span>
+                              {isSimulating ? <input type="number" step="0.1" value={activeCfg.sigma_multiplier ?? 3.0} onChange={e => updateOverride('sigma_multiplier', parseFloat(e.target.value))} style={inputStyle} /> : <strong>{activeCfg.sigma_multiplier} x</strong>}
+                            </div>
+                            {diagnosis?.statsData?.calculatedStats?.[selectedColumn] && (
+                              <div style={{ background: '#111', padding: '10px', borderRadius: '6px', border: '1px dashed #444' }}>
+                                <span style={{ fontSize: '0.8rem', color: '#888' }}>Obliczono dla {selectedColumn}:</span>
+                                <div style={{ marginTop: '5px' }}>
+                                  <div style={{ color: '#aaa', fontSize: '0.85rem' }}>Sigma (σ): <strong>{diagnosis.statsData.calculatedStats[selectedColumn].sigma.toFixed(5)}</strong></div>
+                                  <div style={{ color: '#ffeb3b', fontSize: '0.85rem' }}>Limit tunelu: <strong>± {diagnosis.statsData.calculatedStats[selectedColumn].limit.toFixed(5)}</strong></div>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        ) : activeCfg.diagnosis_type === 'Wskaźniki' ? (
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                            {['mae', 'mse', 'iae', 'ise'].map(metric => (
+                              <div key={metric} style={{ display: 'flex', flexDirection: 'column', ...paramStyle }}>
+                                <span style={{ fontSize: '0.75rem' }}>Skalar {metric.toUpperCase()}:</span>
+                                {isSimulating ? <input type="number" step="0.1" value={activeCfg[`${metric}_threshold`] ?? 1.0} onChange={e => updateOverride(`${metric}_threshold`, parseFloat(e.target.value))} style={{ ...inputStyle, width: '100%', marginTop: '4px' }} /> : <strong style={{ marginTop: '4px' }}>{activeCfg[`${metric}_threshold`]}x</strong>}
+                              </div>
+                            ))}
                           </div>
-                        </div>
-                      )}
+                        ) : activeCfg.diagnosis_type === 'Odchylenie (offsetowe)' ? (
+                          <>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...paramStyle }}><span>Offset Kątowy (A):</span>{isSimulating ? <input type="number" step="0.05" value={activeCfg.a_offset_threshold ?? 0.1} onChange={e => updateOverride('a_offset_threshold', parseFloat(e.target.value))} style={inputStyle} /> : <strong>{activeCfg.a_offset_threshold} °</strong>}</div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...paramStyle }}><span>Offset Prądowy (Cur):</span>{isSimulating ? <input type="number" step="0.5" value={activeCfg.cur_offset_threshold ?? 5.0} onChange={e => updateOverride('cur_offset_threshold', parseFloat(e.target.value))} style={inputStyle} /> : <strong>{activeCfg.cur_offset_threshold} %</strong>}</div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...paramStyle, border: '1px solid #f44336' }}><span>Max udział błędów:</span>{isSimulating ? <input type="number" step="1" value={activeCfg.max_violation_threshold ?? 5.0} onChange={e => updateOverride('max_violation_threshold', parseFloat(e.target.value))} style={inputStyle} /> : <strong style={{ color: '#f44336' }}>{activeCfg.max_violation_threshold} %</strong>}</div>
+                          </>
+                        ) : (
+                          <>
+                            {/* --- DODANO: Wybór metody tuningu dla opcji "Odchylenia" --- */}
+                            <div style={{ marginBottom: '10px' }}>
+                              <span style={{ color: '#aaa', fontSize: '0.75rem' }}>Metoda tuningu tunelu:</span>
+                              {isSimulating ? (
+                                <select 
+                                  value={activeCfg.tuning_mode ?? 'okno'}
+                                  onChange={e => updateOverride('tuning_mode', e.target.value)}
+                                  style={{ width: '100%', background: '#111', color: '#fff', border: '1px solid #444', padding: '6px', marginTop: '4px', borderRadius: '4px' }}
+                                >
+                                  <option value="chwilowy">1. Zwykły procent (Punkt w punkt)</option>
+                                  <option value="okno">2. Procent z okna (Koperta 11-próbek)</option>
+                                  <option value="srednia">3. Procent ze średniej (Globalny tunel)</option>
+                                </select>
+                              ) : (
+                                <strong style={{ display: 'block', marginTop: '4px', color: '#fff' }}>
+                                  {activeCfg.tuning_mode === 'srednia' ? 'Procent ze średniej globalnej' : 
+                                   activeCfg.tuning_mode === 'chwilowy' ? 'Zwykły procent (Punkt w punkt)' : 'Procent z okna (Koperta)'}
+                                </strong>
+                              )}
+                            </div>
+                            
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...paramStyle }}><span>Tol. Kątowa (A):</span>{isSimulating ? <input type="number" step="0.5" value={activeCfg.a_deviation_threshold ?? 2.0} onChange={e => updateOverride('a_deviation_threshold', parseFloat(e.target.value))} style={inputStyle} /> : <strong>{activeCfg.a_deviation_threshold} %</strong>}</div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...paramStyle }}><span>Tol. Prądowa (Cur):</span>{isSimulating ? <input type="number" step="0.5" value={activeCfg.cur_deviation_threshold ?? 2.0} onChange={e => updateOverride('cur_deviation_threshold', parseFloat(e.target.value))} style={inputStyle} /> : <strong>{activeCfg.cur_deviation_threshold} %</strong>}</div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...paramStyle }}><span>Deadband Kątowy:</span>{isSimulating ? <input type="number" step="0.01" value={activeCfg.a_deadband_threshold ?? 0.05} onChange={e => updateOverride('a_deadband_threshold', parseFloat(e.target.value))} style={inputStyle} /> : <strong>{activeCfg.a_deadband_threshold} °</strong>}</div>
+                          </>
+                        )}
+                      </div>
                     </>
-                  ) : diagnosis.usedConfig.diagnosis_type === 'Odchylenie (offsetowe)' ? (
-                    <>
-                      <div style={paramStyle}>Offset A [°]: <strong>{diagnosis.usedConfig.a_offset_threshold}</strong></div>
-                      <div style={paramStyle}>Offset Cur [%]: <strong>{diagnosis.usedConfig.cur_offset_threshold}</strong></div>
-                      <div style={{ ...paramStyle, gridColumn: '1/-1', color: '#f44336' }}>Próg błędu: <strong>{diagnosis.usedConfig.max_violation_threshold}%</strong></div>
-                    </>
-                  ) : (
-                    <>
-                      <div style={paramStyle}>Tol. A [%]: <strong>{diagnosis.usedConfig.a_deviation_threshold}</strong></div>
-                      <div style={paramStyle}>Tol. Cur [%]: <strong>{diagnosis.usedConfig.cur_deviation_threshold}</strong></div>
-                      <div style={paramStyle}>Dead. A [°]: <strong>{diagnosis.usedConfig.a_deadband_threshold}</strong></div>
-                      <div style={paramStyle}>Dead. Cur [%]: <strong>{diagnosis.usedConfig.cur_deadband_threshold}</strong></div>
-                    </>
-                  )}
-                </div>
+                  );
+                })()
               ) : (
                 <p style={{ color: '#555', fontStyle: 'italic', fontSize: '0.85rem' }}>Czekam na dane obliczeniowe...</p>
               )}
@@ -777,31 +938,211 @@ useEffect(() => {
               )}
               
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#222', padding: '10px 15px', borderRadius: '8px', border: '1px solid #333', marginBottom: '1.5rem' }}>
-            <div style={{ display: 'flex', background: '#111', borderRadius: '6px', padding: '3px', border: '1px solid #444' }}>
-              <button onClick={() => setViewMode('detailed')} style={{ padding: '6px 20px', background: viewMode === 'detailed' ? '#e91e63' : 'transparent', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 'bold', transition: 'all 0.2s' }}>🔍 Szczegóły</button>
-              <button onClick={() => setViewMode('overview')} style={{ padding: '6px 20px', background: viewMode === 'overview' ? '#e91e63' : 'transparent', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 'bold', transition: 'all 0.2s' }}>📱 Widok wspólny</button>
+        <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', borderBottom: '1px solid #333', paddingBottom: '15px' }}>
+          <button onClick={() => setViewMode('detailed')} style={{ padding: '8px 20px', background: viewMode === 'detailed' ? '#646cff' : '#222', color: '#fff', border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', transition: '0.3s' }}>
+            🔍 Pojedynczy Przejazd
+          </button>
+          <button onClick={() => setViewMode('combined')} style={{ padding: '8px 20px', background: viewMode === 'combined' ? '#646cff' : '#222', color: '#fff', border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', transition: '0.3s' }}>
+            📊 Widok Wspólny
+          </button>
+          <button 
+            onClick={() => { setViewMode('batch'); if (!batchResults) handleBatchAnalysis(); }} 
+            style={{ padding: '8px 20px', background: viewMode === 'batch' ? '#e91e63' : '#222', color: '#fff', border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', transition: '0.3s' }}
+          >
+            📑 Analiza Folderu (Batch)
+          </button>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button 
+            onClick={() => setShowParamsModal(true)}
+            style={{ padding: '5px 12px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
+          >
+            📊 Parametry sygnału
+          </button>
+          {/* Istniejący wskaźnik udziału błędów... */}
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '10px' }}>
+          <label style={{ color: '#aaa', fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div onClick={() => setShowTimeMarker(!showTimeMarker)} style={{ width: '40px', height: '20px', background: showTimeMarker ? '#9c27b0' : '#444', borderRadius: '10px', position: 'relative', transition: '0.3s', cursor: 'pointer' }}>
+              <div style={{ width: '16px', height: '16px', background: '#fff', borderRadius: '50%', position: 'absolute', top: '2px', left: showTimeMarker ? '22px' : '2px', transition: '0.3s' }} />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button 
-              onClick={() => setShowParamsModal(true)}
-              style={{ padding: '5px 12px', background: '#2196f3', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}
-            >
-              📊 Parametry sygnału
-            </button>
-            {/* Istniejący wskaźnik udziału błędów... */}
-          </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '10px' }}>
-              <label style={{ color: '#aaa', fontSize: '0.85rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div onClick={() => setShowTimeMarker(!showTimeMarker)} style={{ width: '40px', height: '20px', background: showTimeMarker ? '#9c27b0' : '#444', borderRadius: '10px', position: 'relative', transition: '0.3s', cursor: 'pointer' }}>
-                  <div style={{ width: '16px', height: '16px', background: '#fff', borderRadius: '50%', position: 'absolute', top: '2px', left: showTimeMarker ? '22px' : '2px', transition: '0.3s' }} />
-                </div>
-                Synchronizacja 3D
-              </label>
-            </div>
-            {viewMode === 'detailed' && zoomRange && (<button onClick={() => setZoomRange(null)} style={{ padding: '8px 16px', background: '#444', color: 'white', border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '5px' }}>🔄 Reset Zoom</button>)}
-          </div>
+            Synchronizacja 3D
+          </label>
+        </div>
+        
+        {viewMode === 'detailed' && zoomRange && (
+          <button onClick={() => setZoomRange(null)} style={{ padding: '8px 16px', background: '#444', color: 'white', border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            🔄 Reset Zoom
+          </button>
+        )}
+      </div>
 
-          {viewMode === 'detailed' ? (
+          {/* WIDOK: ANALIZA BATCH (TABELA) */}
+          {viewMode === 'batch' ? (
+            <div style={{ background: '#111', padding: '1.5rem', borderRadius: '8px', border: '1px solid #333', width: '100%', boxSizing: 'border-box', minWidth: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <div>
+                  <h3 style={{ color: '#e91e63', margin: 0 }}>Zestawienie Zbiorcze Przejazdów</h3>
+                  <span style={{ color: '#888', fontSize: '0.85rem' }}>Bazuje na limitach z sekcji konfiguracyjnej powyżej</span>
+                </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  {batchResults && (
+                    <button onClick={exportBatchToCSV} style={{ background: '#2196f3', color: 'white', padding: '8px 15px', border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>
+                      📥 Eksport do CSV
+                    </button>
+                  )}
+                  <button onClick={handleBatchAnalysis} disabled={isBatchLoading} style={{ background: '#4caf50', color: 'white', padding: '8px 15px', border: 'none', borderRadius: '4px', cursor: isBatchLoading ? 'wait' : 'pointer', fontWeight: 'bold' }}>
+                    {isBatchLoading ? '⏳ Przeliczanie...' : '🔄 Odśwież Tabelę'}
+                  </button>
+                </div>
+              </div>
+
+              {batchResults ? (
+                <div style={{ width: '100%', overflowX: 'auto', borderRadius: '6px', border: '1px solid #444', paddingBottom: '10px' }}>
+                  <table style={{ borderCollapse: 'collapse', color: '#fff', fontSize: '0.65rem', whiteSpace: 'nowrap' }}>
+                    {/* PRZYWRÓCONE NAGŁÓWKI Z NAZWAMI PLIKÓW */}
+                    <thead>
+                      <tr>
+                        <th style={{ padding: '12px', borderBottom: '2px solid #555', borderRight: '2px solid #555', background: '#222', textAlign: 'left', minWidth: '180px', position: 'sticky', left: 0, zIndex: 2 }}>
+                          Sygnał / Parametr
+                        </th>
+                        {batchResults.map((res: any, idx: number) => (
+                          <th key={idx} style={{ padding: '12px', borderBottom: '2px solid #555', borderRight: '1px solid #333', background: '#1a1a1a', textAlign: 'center' }}>
+                            {res.file_name.replace('.csv', '')}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {/* Wiersz: Label Manualny */}
+                      <tr>
+                        <td style={{ padding: '10px 12px', borderBottom: '1px solid #444', borderRight: '2px solid #555', background: '#1a1a1a', fontWeight: 'bold', position: 'sticky', left: 0, zIndex: 1 }}>
+                          👤 Label Manualny
+                        </td>
+                        {batchResults.map((res: any, idx: number) => (
+                          <td key={`man-${idx}`} style={{ padding: '10px 12px', borderBottom: '1px solid #444', borderRight: '1px solid #333', textAlign: 'center', color: res.manual_label === 'OK' ? '#4caf50' : res.manual_label === 'AWARIA' ? '#f44336' : '#aaa', background: '#111' }}>
+                            {res.manual_label}
+                          </td>
+                        ))}
+                      </tr>
+                      {/* Wiersz: Label Auto */}
+                      <tr>
+                        <td style={{ padding: '10px 12px', borderBottom: '2px solid #555', borderRight: '2px solid #555', background: '#1a1a1a', fontWeight: 'bold', position: 'sticky', left: 0, zIndex: 1 }}>
+                          🤖 Label Systemu
+                        </td>
+                        {batchResults.map((res: any, idx: number) => (
+                          <td key={`auto-${idx}`} style={{ padding: '10px 12px', borderBottom: '2px solid #555', borderRight: '1px solid #333', textAlign: 'center', color: res.auto_label === 'OK' ? '#4caf50' : res.auto_label === 'AWARIA' ? '#f44336' : '#aaa', background: '#111' }}>
+                            {res.auto_label}
+                          </td>
+                        ))}
+                      </tr>
+
+                      {/* Wiersze: Poszczególne Sygnały Z GRADIENTEM */}
+                      {availableColumns.map((colName) => {
+                        const activeThreshold = overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0;
+                        return (
+                          <tr key={colName}>
+                            <td style={{ padding: '8px 12px', borderBottom: '1px solid #333', borderRight: '2px solid #555', background: '#1a1a1a', position: 'sticky', left: 0, zIndex: 1 }}>
+                              {colName}
+                            </td>
+                            {batchResults.map((res: any, idx: number) => {
+                              const val = res.violation_percents[colName] || 0;
+                              const isError = val >= activeThreshold;
+                              
+                              const ratio = Math.min(val / activeThreshold, 1.0);
+                              const bgColor = val === 0 ? '#111' : `rgba(244, 67, 54, ${ratio * 0.8})`;
+
+                              return (
+                                <td key={`${colName}-${idx}`} style={{ padding: '8px 12px', borderBottom: '1px solid #333', borderRight: '1px solid #333', textAlign: 'center', color: isError ? '#fff' : '#e0e0e0', fontWeight: isError ? 'bold' : 'normal', background: bgColor }}>
+                                  {val.toFixed(2)}%
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+
+              {/* --- WYKRES TRENDU (POD TABELĄ) --- */}
+              {batchResults && batchResults.length > 0 && (
+                <div style={{ marginTop: '30px', background: '#1a1a1a', padding: '15px', borderRadius: '6px', border: '1px solid #444' }}>
+                  
+                  {/* NOWOŚĆ: Dedykowany wybór trendu */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                    <h4 style={{ color: '#ffeb3b', margin: 0 }}>📈 Trend degradacji</h4>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ color: '#aaa', fontSize: '0.85rem' }}>Wyświetl dla:</span>
+                      <select 
+                        value={batchTrendSelection} 
+                        onChange={e => setBatchTrendSelection(e.target.value)}
+                        style={{ background: '#222', color: '#fff', border: '1px solid #555', padding: '6px', borderRadius: '4px', outline: 'none' }}
+                      >
+                        <option value="Ogólny">∑ Trend Ogólny </option>
+                        {availableColumns.map(col => (
+                          <option key={col} value={col}>{col}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ height: '300px', width: '100%' }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={batchResults.map((res: any) => {
+                          let wartosc = 0;
+                          
+                          // NOWOŚĆ: Matematyka dla trendu ogólnego (średnia z błędów > 0)
+                          if (batchTrendSelection === 'Ogólny') {
+                            const violationValues = Object.values(res.violation_percents || {}) as number[];
+                            const nonZeroValues = violationValues.filter(v => typeof v === 'number' && v > 0);
+                            wartosc = nonZeroValues.length > 0 
+                              ? nonZeroValues.reduce((sum, val) => sum + val, 0) / nonZeroValues.length 
+                              : 0;
+                          } else {
+                            // Konkretny sygnał
+                            wartosc = res.violation_percents[batchTrendSelection] || 0;
+                          }
+
+                          return {
+                            name: res.file_name.replace('przejazd_', 'P').replace('.csv', ''),
+                            wartosc: parseFloat(wartosc.toFixed(2)),
+                            limit: overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0
+                          };
+                        })}
+                        margin={{ top: 10, right: 30, left: 0, bottom: 20 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                        <XAxis dataKey="name" stroke="#888" angle={-45} textAnchor="end" height={60} fontSize={12} />
+                        <YAxis stroke="#888" unit="%" />
+                        <Tooltip contentStyle={{ backgroundColor: '#222', border: '1px solid #555' }} />
+                        <Legend />
+                        <ReferenceLine 
+                          y={overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0} 
+                          label={{ position: 'top', value: 'Próg Awarii', fill: '#f44336', fontSize: 12 }} 
+                          stroke="#f44336" 
+                          strokeDasharray="3 3" 
+                        />
+                        <Line 
+                          type="monotone" 
+                          name={batchTrendSelection === 'Ogólny' ? 'Średni udział odchyłek (>0)' : `Odchylenia ${batchTrendSelection}`} 
+                          dataKey="wartosc" 
+                          stroke="#ff9800" 
+                          strokeWidth={3} 
+                          dot={{ r: 4, fill: '#ff9800' }} 
+                          activeDot={{ r: 8 }} 
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : viewMode === 'detailed' ? (
             <>
               {/* Sekcja wyboru sygnału i podsumowania błędów */}
               <div style={{ marginBottom: '1.5rem', background: '#222', padding: '10px 15px', borderRadius: '8px', border: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -827,7 +1168,7 @@ useEffect(() => {
               <h3 style={{ color: '#fff', marginBottom: '0.5rem', borderBottom: '1px solid #444', paddingBottom: '5px' }}>Porównanie z referencją {unit ? `[${unit}]` : ''}</h3>
               <div style={{ height: '300px', background: '#111', padding: '1rem', borderRadius: '8px', border: '1px solid #333', marginBottom: '2.5rem', position: 'relative' }}>
                 
-                {/* ZNÓW UŻYWAMY DIVA - Płynna animacja bez lagów */}
+                
                 {showTimeMarker && (
                     <div 
                       ref={mainChartLineRef}
@@ -845,7 +1186,7 @@ useEffect(() => {
                     <CartesianGrid strokeDasharray="3 3" stroke="#333" />
                     <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#888" hide />
                     
-                    {/* KLUCZOWE: width={80} - sztywna szerokość osi Y */}
+                    
                     <YAxis width={62} domain={['auto', 'auto']} stroke="#888" label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#888' }} />
                     
                     <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#444' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => { if (Array.isArray(v)) return [`od ${v[0].toFixed(2)} do ${v[1].toFixed(2)} ${unit}`, name]; return [`${Number(v).toFixed(2)} ${unit}`, name]; }} />

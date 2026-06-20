@@ -9,7 +9,7 @@ from backend.websocket_manager import manager
 from backend.config import BASE_DIR, DEFAULT_ROBOTS, ROOT_PATH
 import math
 import json
-from typing import Dict, Any 
+from typing import Optional, Dict, Any 
 
 router = APIRouter()
 
@@ -331,6 +331,7 @@ def get_robot_info(req: RobotInfoReq):
 class DiagnoseReq(BaseModel):
     robot_name: str
     test_file_path: str
+    override_config: Optional[Dict[str, Any]] = None
 
 def safe_float(val, default=0.0):
     """Bezpieczne rzutowanie na float, chroni przed wartościami None (null z JSON)"""
@@ -367,8 +368,11 @@ def set_file_status(req: FileStatusReq):
 @router.post("/api/diagnose")
 def run_diagnosis(req: DiagnoseReq):
     configs = load_robot_configs()
-    config = configs.get(req.robot_name, {})
+    config = configs.get(req.robot_name, {}).copy()
     
+    if req.override_config:
+        config.update(req.override_config)
+
     ref_dir = os.path.join(BASE_DIR, req.robot_name, "Przebieg_referencyjny")
     ref_files = [f for f in os.listdir(ref_dir) if os.path.isfile(os.path.join(ref_dir, f))] if os.path.exists(ref_dir) else []
     
@@ -463,10 +467,26 @@ def run_diagnosis(req: DiagnoseReq):
 
             # 2. LOGIKA TUNELU (Dodajemy tryb Statystyka)
             if diag_type == 'Odchylenia':
+            # Domyślnie używamy 'okno', aby nie popsuć Twoich starych konfiguracji
+                tuning_mode = config.get('tuning_mode', 'okno') 
                 dev_thr = safe_float(config.get('a_deviation_threshold' if is_a else 'cur_deviation_threshold'), 2.0)
                 deadband = safe_float(config.get('a_deadband_threshold' if is_a else 'cur_deadband_threshold'), 0.05)
-                rolling_max = pd.Series(r_vals).abs().rolling(window=11, center=True, min_periods=1).max().values
-                margin = np.maximum(rolling_max * (dev_thr / 100.0), deadband)
+            
+                if tuning_mode == 'srednia':
+                    # 1. Procent ze średniej globalnej
+                    global_mean = np.abs(r_vals).mean()
+                    base_margin = np.full(min_len, global_mean * (dev_thr / 100.0), dtype=float)
+                    margin = np.maximum(base_margin, deadband)
+                    
+                elif tuning_mode == 'chwilowy':
+                    # 2. Sztywny próg dla każdej próbki (traktowany jako wartość absolutna / punkty procentowe)
+                    base_margin = np.full(min_len, dev_thr, dtype=float)
+                    margin = np.maximum(base_margin, deadband)
+                    
+                else:
+                    # 3. 'okno' - Twój oryginalny kod (Koperta z 11 próbek)
+                    rolling_max = pd.Series(r_vals).abs().rolling(window=11, center=True, min_periods=1).max().values
+                    margin = np.maximum(rolling_max * (dev_thr / 100.0), deadband)
                 
             elif diag_type == 'Odchylenie (offsetowe)':
                 off_thr = safe_float(config.get('a_offset_threshold' if is_a else 'cur_offset_threshold'), 0.1)
@@ -604,8 +624,116 @@ def run_diagnosis(req: DiagnoseReq):
             "columns": cols,
             "usedConfig": config  
         }
+    
         
     except Exception as e:
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
+    
+class BatchDiagnoseReq(BaseModel):
+    robot_name: str
+    folder_path: str
+    override_config: Optional[Dict[str, Any]] = None
+
+@router.post("/api/diagnose/batch")
+def run_batch_diagnosis(req: BatchDiagnoseReq):
+    clean_folder_path = req.folder_path
+    base_dir_name = os.path.basename(BASE_DIR.strip("/\\"))
+    
+    if clean_folder_path.startswith(base_dir_name + "/"):
+        clean_folder_path = clean_folder_path[len(base_dir_name)+1:]
+        
+    target_dir = os.path.join(BASE_DIR, clean_folder_path)
+    
+    if not os.path.isdir(target_dir):
+        return {"error": f"Podana ścieżka nie jest folderem: {target_dir}"}
+        
+    results = []
+    files_in_dir = os.listdir(target_dir)
+    print(f"\n--- BATCH DIAGNOSE: Skanowanie folderu {clean_folder_path} ---")
+    
+    for file_name in files_in_dir:
+        abs_path = os.path.join(target_dir, file_name)
+        
+        if os.path.isfile(abs_path) and file_name.lower().endswith(".csv") and "referenc" not in file_name.lower():
+            file_rel_path = f"{req.folder_path}/{file_name}" if not req.folder_path.startswith(base_dir_name + "/") else f"{clean_folder_path}/{file_name}"
+
+            print(f"[{file_name}] Ścieżka absolutna do wstrzyknięcia: {abs_path}")
+            
+            single_req = DiagnoseReq(
+                robot_name=req.robot_name,
+                test_file_path=abs_path.replace("\\", "/"),  # Twarda ścieżka absolutna
+                override_config=req.override_config
+            )
+            
+            try:
+                diag_res = run_diagnosis(single_req)
+                
+                if "error" not in diag_res:
+                    g_diag = diag_res.get("globalDiagnosis", {})
+                    s_data = diag_res.get("statsData", {})
+                    
+                    # 1. WYDRUK DIAGNOSTYCZNY SUB-KLUCZY (Żebyśmy widzieli strukturę jak na dłoni)
+                    print(f"[{file_name}]")
+                    print(f"  -> globalDiagnosis: {list(g_diag.keys()) if isinstance(g_diag, dict) else g_diag}")
+                    print(f"  -> statsData: {list(s_data.keys()) if isinstance(s_data, dict) else 'nie jest słownikiem'}")
+                    
+                    # 2. INTELIGENTNE WYCIĄGANIE STATUSÓW (camelCase + snake_case)
+                    manual_label = "BRAK"
+                    auto_label = "BRAK"
+                    if isinstance(g_diag, dict):
+                        # System zwraca wartość boolean (True/False) w kluczu 'isFailure'
+                        is_failure = g_diag.get("isFailure")
+                        if is_failure is True:
+                            auto_label = "AWARIA"
+                        elif is_failure is False:
+                            auto_label = "OK"
+
+                    # Status manualny "zgadujemy" na podstawie ścieżki (jeśli w nazwie folderu lub pliku jest słowo awaria)
+                    path_lower = file_rel_path.lower()
+                    if "awaria" in path_lower or "bad" in path_lower or "error" in path_lower:
+                        manual_label = "AWARIA"
+                    elif "ok" in path_lower or "good" in path_lower or "referenc" in path_lower:
+                        manual_label = "OK"
+                    else:
+                        manual_label = "NIEZNANY" # Jeśli w ścieżce (np. "Archiwum") nie ma informacji
+                    
+                    # 3. INTELIGENTNE WYCIĄGANIE PROCENTÓW AWARII PER KOLUMNA
+                    violation_percents = {}
+                    
+                    # Sprawdzamy czy są bezpośrednio pod ogólnymi kluczami procentowymi
+                    if isinstance(s_data, dict) and "violationPercents" in s_data:
+                        violation_percents = s_data["violationPercents"]
+                    elif isinstance(s_data, dict) and "violation_percents" in s_data:
+                        violation_percents = s_data["violation_percents"]
+                    elif isinstance(diag_res, dict) and "violationPercents" in diag_res:
+                        violation_percents = diag_res["violationPercents"]
+                    else:
+                        # Przeszukujemy strukturę parametrów sygnałów (signalParams -> col)
+                        if isinstance(s_data, dict) and "signalParams" in s_data:
+                            sig_params = s_data["signalParams"]
+                            for col in diag_res.get("columns", []):
+                                if col in sig_params and isinstance(sig_params[col], dict):
+                                    col_data = sig_params[col]
+                                    # Wyciągamy bezpośredni procent lub szukamy głębiej w statystykach surowych (raw)
+                                    val = col_data.get("violationPercent", col_data.get("violation_percent"))
+                                    if val is None and "raw" in col_data and isinstance(col_data["raw"], dict):
+                                        val = col_data["raw"].get("violationPercent", col_data["raw"].get("violation_percent"))
+                                    
+                                    violation_percents[col] = float(val) if val is not None else 0.0
+                    
+                    results.append({
+                        "file_name": file_name,
+                        "manual_label": manual_label,
+                        "auto_label": auto_label,
+                        "violation_percents": violation_percents
+                    })
+                else:
+                    print(f"[{file_name}] Pominięto błąd: {diag_res['error']}")
+            except Exception as e:
+                print(f"🔥 BŁĄD KRYTYCZNY w batch dla {file_name}: {e}")
+                
+    results = sorted(results, key=lambda x: x["file_name"])
+    print(f"--- Zakończono. Przekazano {len(results)} plików do tabeli! ---\n")
+    return {"batch_results": results}
