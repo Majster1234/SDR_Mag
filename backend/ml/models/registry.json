@@ -2,56 +2,11 @@
     "active_model_id": null,
     "models": [
         {
-            "group_id": "group_1781997967",
-            "name": "Model1",
-            "algorithm": "Windowed Isolation Forest",
-            "created_at": "2026-06-21 01:26:13",
-            "files_used_count": 13,
-            "window_size": 30,
-            "step_size": 10,
-            "axes_trained": [
-                "A1",
-                "A2",
-                "A3",
-                "A4",
-                "A5",
-                "A6",
-                "Cur1",
-                "Cur2",
-                "Cur3",
-                "Cur4",
-                "Cur5",
-                "Cur6"
-            ]
-        },
-        {
-            "group_id": "group_1781998929",
-            "name": "Model_Przejazdy_z_dnia_16_05_26_luzny_chwytak_Bazowy",
-            "algorithm": "Windowed Isolation Forest",
-            "created_at": "2026-06-21 01:42:15",
-            "files_used_count": 13,
-            "window_size": 10,
-            "step_size": 5,
-            "axes_trained": [
-                "A1",
-                "A2",
-                "A3",
-                "A4",
-                "A5",
-                "A6",
-                "Cur1",
-                "Cur2",
-                "Cur3",
-                "Cur4",
-                "Cur5",
-                "Cur6"
-            ]
-        },
-        {
-            "group_id": "group_1781999626",
-            "name": "model2",
-            "algorithm": "Windowed Isolation Forest",
-            "created_at": "2026-06-21 01:53:51",
+            "group_id": "group_1782053093",
+            "name": "Model 3 cont 0.03 LOF",
+            "algorithm": "LOF",
+            "contamination": 0.03,
+            "created_at": "2026-06-21 16:44:54",
             "files_used_count": 11,
             "window_size": 15,
             "step_size": 5,
@@ -69,7 +24,55 @@
                 "Cur5",
                 "Cur6"
             ]
+        },
+        {
+            "group_id": "group_1782053546",
+            "name": "Model_Przejazdy_z_dnia_16_05_26_luzny_chwytak_Bazowy",
+            "algorithm": "Isolation Forest",
+            "contamination": 0.5,
+            "created_at": "2026-06-21 16:52:33",
+            "files_used_count": 11,
+            "window_size": 50,
+            "step_size": 10,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        },
+        {
+            "group_id": "group_1782053588",
+            "name": "Model_Przejazdy_z_dnia_16_05_26_luzny_chwytak_Bazowy",
+            "algorithm": "Isolation Forest",
+            "contamination": 0.05,
+            "created_at": "2026-06-21 16:53:15",
+            "files_used_count": 11,
+            "window_size": 50,
+            "step_size": 10,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
         }
     ],
-    "active_model_group_id": "group_1781998929"
+    "active_model_group_id": null
 }

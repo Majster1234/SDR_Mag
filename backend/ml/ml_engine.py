@@ -1,11 +1,13 @@
-# backend/ml/ml_engine.py
 import os
 import json
 import joblib
 import pandas as pd
 import numpy as np
 from datetime import datetime
+
 from sklearn.ensemble import IsolationForest
+from sklearn.svm import OneClassSVM
+from sklearn.neighbors import LocalOutlierFactor
 
 ML_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(ML_DIR, "models")
@@ -42,29 +44,7 @@ class MLEngine:
         df.fillna(0, inplace=True)
         return df
 
-
-    def get_all_model_visualization_data(self, group_id):
-        registry = self.get_registry()
-        # Szukamy grupy w rejestrze, żeby wiedzieć, jakie osie ma wyuczone
-        target_group = next((g for g in registry["models"] if g["group_id"] == group_id), None)
-        
-        if not target_group:
-            return {"error": "Nie znaleziono modelu w rejestrze."}
-            
-        result_data = {}
-        # Ładujemy z dysku wszystkie wyuczone osie w jednej pętli
-        for axis in target_group["axes_trained"]:
-            filepath = os.path.join(MODELS_DIR, f"{group_id}_{axis}.pkl")
-            if os.path.exists(filepath):
-                try:
-                    payload = joblib.load(filepath)
-                    result_data[axis] = payload.get("vis_data", [])
-                except Exception:
-                    pass
-                    
-        return {"status": "success", "data": result_data}
-
-    def train_windowed_models(self, model_name, training_folder_path, reference_file_path, window_size=50, step_size=10, contamination=0.03):
+    def train_windowed_models(self, model_name, training_folder_path, reference_file_path, window_size=50, step_size=10, algorithm="Isolation Forest", contamination=0.03):
         if not os.path.exists(training_folder_path) or not os.path.exists(reference_file_path):
             return {"status": "error", "message": f"Brak folderu danych lub pliku referencji."}
 
@@ -109,17 +89,39 @@ class MLEngine:
                     continue 
                 
                 X_train = pd.DataFrame(samples, columns=feature_names)
-                clf = IsolationForest(contamination=contamination, random_state=42, n_estimators=100)
-                clf.fit(X_train)
                 
-                # ZMIANA: Wyciągamy predykcje (-1 to anomalia, 1 to norma) i zapisujemy do wykresu
+                if algorithm == "Isolation Forest":
+                    clf = IsolationForest(contamination=contamination, random_state=42, n_estimators=100)
+                elif algorithm == "One-Class SVM":
+                    clf = OneClassSVM(nu=contamination, kernel="rbf", gamma="auto")
+                elif algorithm == "LOF":
+                    clf = LocalOutlierFactor(contamination=contamination, novelty=True, n_neighbors=20)
+                else:
+                    return {"status": "error", "message": "Nieznany algorytm."}
+                    
+                clf.fit(X_train)
                 preds = clf.predict(X_train)
                 vis_df = X_train.copy()
-                vis_df['prediction'] = preds.astype(int) # Ważne: rzutowanie na standardowy int!
+                vis_df['prediction'] = preds.astype(int)
                 
-                # Zabezpieczenie przed przeładowaniem RAM przeglądarki - max 2000 punktów do wykresu
-                if len(vis_df) > 2000:
-                    vis_df = vis_df.sample(n=2000, random_state=42)
+                try:
+                    scores = clf.decision_function(X_train)
+                    vis_df['score'] = scores
+                except AttributeError:
+                    vis_df['score'] = 1.0 
+
+                anomalies = vis_df[vis_df['prediction'] == -1]
+                normals = vis_df[vis_df['prediction'] == 1]
+
+                if len(normals) > 300:
+                    normals = normals.sort_values(by='score')
+                    boundary_normals = normals.iloc[:100]
+                    deep_normals = normals.iloc[100:].sample(n=200, random_state=42)
+                    vis_df = pd.concat([anomalies, boundary_normals, deep_normals])
+                else:
+                    vis_df = pd.concat([anomalies, normals])
+
+                vis_df = vis_df.drop(columns=['score'], errors='ignore')
                 
                 axis_filename = f"{group_id}_{col}.pkl"
                 axis_model_path = os.path.join(MODELS_DIR, axis_filename)
@@ -130,19 +132,20 @@ class MLEngine:
                     "feature_names": feature_names,
                     "window_size": window_size,
                     "step_size": step_size,
-                    "vis_data": vis_df.to_dict(orient='records') # Zapisujemy chmurę punktów!
+                    "vis_data": vis_df.to_dict(orient='records')
                 }
                 joblib.dump(payload, axis_model_path)
                 trained_axes_list.append(col)
 
             if not trained_axes_list:
-                return {"status": "error", "message": "Nie udało się wytrenować modelu dla żadnej osi. Pliki są zbyt krótkie."}
+                return {"status": "error", "message": "Nie udało się wytrenować modelu dla żadnej osi."}
 
             registry = self.get_registry()
             new_group_entry = {
                 "group_id": group_id,
                 "name": model_name,
-                "algorithm": "Windowed Isolation Forest",
+                "algorithm": algorithm,
+                "contamination": contamination,
                 "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "files_used_count": files_processed,
                 "window_size": window_size,
@@ -165,46 +168,30 @@ class MLEngine:
             }
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {"status": "error", "message": f"Zatrzymano proces (Wyjątek Pythona): {str(e)}"}
 
-    # NOWA FUNKCJA: Pobiera zapisane punkty z pliku .pkl
-    def get_model_visualization_data(self, group_id, axis):
-        filepath = os.path.join(MODELS_DIR, f"{group_id}_{axis}.pkl")
-        if not os.path.exists(filepath):
-            return {"error": "Brak pliku modelu dla tej osi na dysku."}
-        try:
-            payload = joblib.load(filepath)
-            return {"status": "success", "data": payload.get("vis_data", [])}
-        except Exception as e:
-            return {"error": f"Błąd odczytu: {str(e)}"}
-
-    def delete_model_group(self, group_id):
-        try:
-            registry = self.get_registry()
-            group_to_delete = next((g for g in registry["models"] if g["group_id"] == group_id), None)
+    def get_all_model_visualization_data(self, group_id):
+        registry = self.get_registry()
+        target_group = next((g for g in registry["models"] if g["group_id"] == group_id), None)
+        
+        if not target_group:
+            return {"error": "Nie znaleziono modelu w rejestrze."}
             
-            if not group_to_delete:
-                return {"status": "error", "message": "Nie znaleziono modelu w rejestrze."}
-                
-            # 1. Usuwanie fizycznych plików .pkl z dysku
-            for axis in group_to_delete.get("axes_trained", []):
-                file_path = os.path.join(MODELS_DIR, f"{group_id}_{axis}.pkl")
-                if os.path.exists(file_path):
-                    os.remove(file_path)
+        result_data = {}
+        for axis in target_group["axes_trained"]:
+            filepath = os.path.join(MODELS_DIR, f"{group_id}_{axis}.pkl")
+            if os.path.exists(filepath):
+                try:
+                    payload = joblib.load(filepath)
+                    result_data[axis] = payload.get("vis_data", [])
+                except Exception:
+                    pass
                     
-            # 2. Usuwanie wpisu z pliku JSON
-            registry["models"] = [g for g in registry["models"] if g["group_id"] != group_id]
-            
-            # 3. Jeśli usunęliśmy aktywny model, resetujemy wskaźnik
-            if registry.get("active_model_group_id") == group_id:
-                registry["active_model_group_id"] = None
-                
-            self._save_registry(registry)
-            return {"status": "success", "message": f"Model usunięty pomyślnie."}
-        except Exception as e:
-            return {"status": "error", "message": f"Błąd podczas usuwania z dysku: {str(e)}"}
+        return {"status": "success", "data": result_data}
+
     def evaluate_file(self, group_id, axis, test_file_path, reference_file_path):
-        """Ewaluuje konkretny plik używając wyuczonego lasu izolacji (Isolation Forest)."""
         if not os.path.exists(test_file_path) or not os.path.exists(reference_file_path):
             return {"status": "error", "message": "Brak pliku badanego lub referencyjnego na dysku."}
             
@@ -213,14 +200,12 @@ class MLEngine:
             return {"status": "error", "message": "Brak wyuczonego modelu dla tej osi."}
             
         try:
-            # 1. Ładowanie logiki modelu z pliku .pkl
             payload = joblib.load(model_path)
             model = payload["model"]
             window_size = payload["window_size"]
             step_size = payload["step_size"]
             feature_names = payload["feature_names"]
             
-            # 2. Czytanie i czyszczenie plików CSV
             test_df = self._read_and_clean_csv(test_file_path)
             ref_df = self._read_and_clean_csv(reference_file_path)
             
@@ -232,7 +217,6 @@ class MLEngine:
             r_vals = ref_df[axis].iloc[:min_len].to_numpy()
             residual = t_vals - r_vals
             
-            # Ekstrakcja czasu (w sekundach)
             time_col = next((c for c in ref_df.columns if 'time' in c.lower() or 'czas' in c.lower()), None)
             if time_col:
                 start_time = float(ref_df[time_col].iloc[0])
@@ -240,30 +224,23 @@ class MLEngine:
             else:
                 times = np.arange(min_len, dtype=float)
                 
-            # Tablica boolowska z informacją, czy w danej próbce występuje anomalia
             is_anomaly = np.zeros(min_len, dtype=bool)
             
-            # 3. PĘTLA OKIENKOWA - DIAGNOSTYKA NA ŻYWO
             for i in range(0, min_len - window_size + 1, step_size):
                 window = residual[i : i + window_size]
                 if len(window) < window_size: continue
                 
-                # Obliczanie cech dla tego okienka
                 mae = float(np.mean(np.abs(window)))
                 rmse = float(np.sqrt(np.mean(window ** 2)))
                 var = float(np.var(window))
                 ptp = float(np.max(window) - np.min(window))
                 
                 X_test = pd.DataFrame([[mae, rmse, var, ptp]], columns=feature_names)
-                
-                # ZAPYTANIE DO AI: Jaki jest werdykt dla tego okienka? (-1 awaria, 1 norma)
                 prediction = model.predict(X_test)[0]
                 
                 if prediction == -1: 
-                    # Nakładamy 'czerwony stempel' na te 50 milisekund w głównej tablicy
                     is_anomaly[i : i + window_size] = True
                     
-            # 4. PRZYGOTOWANIE DANYCH DO WYKRESU LINIOWEGO W REACT (jak w AnalizaPrzebiegow)
             chart_data = []
             for i in range(min_len):
                 chart_data.append({
@@ -273,7 +250,6 @@ class MLEngine:
                     "Roznica": round(float(residual[i]), 4)
                 })
                 
-            # Zbieranie czerwonych "stref" (violation_areas) by podświetlić tło wykresu
             violation_areas = []
             out_indices = np.where(is_anomaly)[0]
             if len(out_indices) > 0:
@@ -296,7 +272,29 @@ class MLEngine:
             }
             
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return {"status": "error", "message": f"Błąd weryfikacji: {str(e)}"}    
+            return {"status": "error", "message": f"Błąd weryfikacji: {str(e)}"}
+
+    def delete_model_group(self, group_id):
+        try:
+            registry = self.get_registry()
+            group_to_delete = next((g for g in registry["models"] if g["group_id"] == group_id), None)
+            
+            if not group_to_delete:
+                return {"status": "error", "message": "Nie znaleziono modelu w rejestrze."}
+                
+            for axis in group_to_delete.get("axes_trained", []):
+                file_path = os.path.join(MODELS_DIR, f"{group_id}_{axis}.pkl")
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    
+            registry["models"] = [g for g in registry["models"] if g["group_id"] != group_id]
+            
+            if registry.get("active_model_group_id") == group_id:
+                registry["active_model_group_id"] = None
+                
+            self._save_registry(registry)
+            return {"status": "success", "message": f"Model usunięty pomyślnie."}
+        except Exception as e:
+            return {"status": "error", "message": f"Błąd podczas usuwania z dysku: {str(e)}"}
+
 ml_engine = MLEngine()

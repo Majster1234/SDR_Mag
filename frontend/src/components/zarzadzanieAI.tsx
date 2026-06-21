@@ -1,4 +1,3 @@
-// ZarzadzanieAI.tsx
 import { useState, useEffect } from 'react';
 import { emitAppLog } from './Notifications';
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, LineChart, Line, ReferenceArea, Legend } from 'recharts';
@@ -7,6 +6,7 @@ interface MLModelEntry {
   group_id: string;
   name: string;
   algorithm: string;
+  contamination: number;
   created_at: string;
   files_used_count: number;
   window_size: number;
@@ -21,6 +21,13 @@ interface MLSource {
   test_files: string[];
 }
 
+const FEATURE_LABELS: Record<string, string> = {
+  mae: 'Średni Uchyb (MAE)',
+  rmse: 'Błąd Średniokwadratowy (RMSE)',
+  var: 'Wariancja uchybu (VAR)',
+  ptp: 'Rozstęp (Peak-to-Peak)'
+};
+
 export const ZarzadzanieAI = () => {
   const [sources, setSources] = useState<MLSource[]>([]);
   const [selectedRobot, setSelectedRobot] = useState<string>('');
@@ -30,6 +37,8 @@ export const ZarzadzanieAI = () => {
   const [refPath, setRefPath] = useState('');
   const [windowSize, setWindowSize] = useState(50); 
   const [stepSize, setStepSize] = useState(10);    
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState('Isolation Forest');
+  const [contamination, setContamination] = useState(0.03);
   
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ status: string; message: string; axes_trained?: string[] } | null>(null);
@@ -38,7 +47,6 @@ export const ZarzadzanieAI = () => {
     models: []
   });
 
-  // STANY WYKRESU
   const [selectedGroupToView, setSelectedGroupToView] = useState<MLModelEntry | null>(null);
   const [selectedAxisToView, setSelectedAxisToView] = useState<string>('');
   
@@ -46,12 +54,16 @@ export const ZarzadzanieAI = () => {
   const [chartData, setChartData] = useState<any[]>([]);
   const [isChartLoading, setIsChartLoading] = useState(false);
 
+  const [modelToDelete, setModelToDelete] = useState<MLModelEntry | null>(null);
+
   const [testFilePath, setTestFilePath] = useState('');
   const [isTesting, setIsTesting] = useState(false);
-  const [testResults, setTestResults] = useState<{ chartData: any[], violationAreas: any[], anomalyPercent: number } | null>(null);
+  // --- NOWOŚĆ: STAN PASKA POSTĘPU ---
+  const [testProgress, setTestProgress] = useState<number>(0);
+  const [testResults, setTestResults] = useState<Record<string, { chartData: any[], violationAreas: any[], anomalyPercent: number }> | null>(null);
 
-  // --- NOWOŚĆ: STAN DO USUWANIA MODELU (POPUP) ---
-  const [modelToDelete, setModelToDelete] = useState<MLModelEntry | null>(null);
+  const [xAxisFeature, setXAxisFeature] = useState('var');
+  const [yAxisFeature, setYAxisFeature] = useState('rmse');
 
   const fetchData = async () => {
     try {
@@ -106,52 +118,6 @@ export const ZarzadzanieAI = () => {
     }
   }, [selectedAxisToView, allChartData]);
 
-  // Weryfikacja pliku w AI
-  const handleTestFile = async () => {
-    if (!selectedGroupToView || !selectedAxisToView || !testFilePath || !refPath) {
-      emitAppLog('warning', 'Wybierz plik z listy oraz upewnij się, że wybrano referencję.');
-      return;
-    }
-    
-    setIsTesting(true);
-    setTestResults(null);
-    emitAppLog('info', `Uruchamiam AI (Isolation Forest) dla pliku: ${testFilePath}`);
-    
-    try {
-      const response = await fetch('http://localhost:8000/api/ml/test', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          group_id: selectedGroupToView.group_id,
-          axis: selectedAxisToView,
-          test_file_path: testFilePath,
-          reference_file_path: refPath
-        })
-      });
-      const data = await response.json();
-      
-      if (data.status === 'success') {
-        setTestResults(data);
-        emitAppLog(data.anomalyPercent > 0 ? 'warning' : 'success', `Zakończono weryfikację. Wykryto ${data.anomalyPercent}% anomalii na osi ${selectedAxisToView}.`);
-      } else {
-        emitAppLog('error', `Błąd testu: ${data.message}`);
-      }
-    } catch (err) {
-      emitAppLog('error', 'Krytyczny błąd sieci podczas weryfikacji pliku.');
-    } finally {
-      setIsTesting(false);
-    }
-  };
-
-  // Kiedy zmieniasz robota, zresetuj listę plików
-  useEffect(() => {
-    if (activeSource && activeSource.test_files.length > 0) {
-      setTestFilePath(activeSource.test_files[0]);
-    } else {
-      setTestFilePath('');
-    }
-  }, [selectedRobot, sources]);
-
   const handleRobotChange = (robotName: string, availableSources = sources) => {
     setSelectedRobot(robotName);
     const source = availableSources.find(s => s.robot_name === robotName);
@@ -177,7 +143,9 @@ export const ZarzadzanieAI = () => {
           folder_path: folderPath,
           reference_path: refPath,
           window_size: windowSize,
-          step_size: stepSize
+          step_size: stepSize,
+          algorithm: selectedAlgorithm,
+          contamination: contamination
         })
       });
       
@@ -198,7 +166,6 @@ export const ZarzadzanieAI = () => {
     }
   };
 
-  // --- NOWOŚĆ: FUNKCJA POTWIERDZAJĄCA USUNIĘCIE MODELU ---
   const confirmDelete = async () => {
     if (!modelToDelete) return;
     try {
@@ -207,11 +174,9 @@ export const ZarzadzanieAI = () => {
       
       if (data.status === 'success') {
         emitAppLog('success', `Usunięto bazę modelu: ${modelToDelete.name}`);
-        // Odświeżamy tabelę
         const regRes = await fetch('http://localhost:8000/api/ml/registry');
         if (regRes.ok) setRegistry(await regRes.json());
         
-        // Zamykamy wykres jeśli akurat patrzyliśmy na usunięty model
         if (selectedGroupToView?.group_id === modelToDelete.group_id) {
           setSelectedGroupToView(null);
           setChartData([]);
@@ -222,9 +187,82 @@ export const ZarzadzanieAI = () => {
     } catch (err) {
       emitAppLog('error', 'Krytyczny błąd API podczas usuwania modelu.');
     } finally {
-      setModelToDelete(null); // Zamknij popup
+      setModelToDelete(null); 
     }
   };
+
+  const handleTestFile = async () => {
+    if (!selectedGroupToView || !testFilePath || !refPath) {
+      emitAppLog('warning', 'Wybierz plik z listy oraz upewnij się, że wybrano referencję.');
+      return;
+    }
+    
+    setIsTesting(true);
+    setTestProgress(0); // Reset paska
+    setTestResults(null);
+    emitAppLog('info', `Uruchamiam AI (${selectedGroupToView.algorithm}) dla wszystkich osi pliku: ${testFilePath}`);
+    
+    // Zmienne pomocnicze do obliczania postępu
+    const totalAxes = selectedGroupToView.axes_trained.length;
+    let completedCount = 0;
+
+    try {
+      const fetchPromises = selectedGroupToView.axes_trained.map(async (ax) => {
+        const response = await fetch('http://localhost:8000/api/ml/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            group_id: selectedGroupToView.group_id,
+            axis: ax,
+            test_file_path: testFilePath,
+            reference_file_path: refPath
+          })
+        });
+        const data = await response.json();
+        
+        // --- NOWOŚĆ: Po każdym udanym pobraniu osi podbijamy pasek postępu ---
+        completedCount++;
+        setTestProgress(Math.round((completedCount / totalAxes) * 100));
+
+        return { axis: ax, data };
+      });
+
+      const resultsArray = await Promise.all(fetchPromises);
+      const resultsObj: Record<string, any> = {};
+      let maxAnomaly = 0;
+      let anySuccess = false;
+
+      resultsArray.forEach(({ axis, data }) => {
+        if (data.status === 'success') {
+          resultsObj[axis] = data;
+          if (data.anomalyPercent > maxAnomaly) maxAnomaly = data.anomalyPercent;
+          anySuccess = true;
+        } else {
+          emitAppLog('error', `Błąd testu dla osi ${axis}: ${data.message}`);
+        }
+      });
+
+      if (anySuccess) {
+        setTestResults(resultsObj);
+        emitAppLog(maxAnomaly > 0 ? 'warning' : 'success', `Zakończono weryfikację. Maksymalna anomalia: ${maxAnomaly}%`);
+      }
+
+    } catch (err) {
+      emitAppLog('error', 'Krytyczny błąd sieci podczas weryfikacji pliku.');
+    } finally {
+      setIsTesting(false);
+      // Małe opóźnienie przed wyzerowaniem, by użytkownik zobaczył "100%"
+      setTimeout(() => setTestProgress(0), 1000);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSource && activeSource.test_files.length > 0) {
+      setTestFilePath(activeSource.test_files[0]);
+    } else {
+      setTestFilePath('');
+    }
+  }, [selectedRobot, sources]);
 
   const activeSource = sources.find(s => s.robot_name === selectedRobot);
 
@@ -258,6 +296,18 @@ export const ZarzadzanieAI = () => {
             <input type="text" value={modelName} onChange={e => setModelName(e.target.value)} style={{ width: '100%', padding: '8px', background: '#1a1a1a', color: '#00ccff', border: '1px solid #444', borderRadius: '4px', marginTop: '5px', boxSizing: 'border-box', fontWeight: 'bold' }} />
           </label>
           
+          <label style={{ color: '#fff', fontSize: '0.9rem', marginTop: '10px' }}>5. Metoda / Silnik Sztucznej Inteligencji:
+            <select 
+              value={selectedAlgorithm} 
+              onChange={e => setSelectedAlgorithm(e.target.value)} 
+              style={{ width: '100%', padding: '8px', background: '#222', color: '#fff', border: '1px solid #444', borderRadius: '4px', marginTop: '5px', boxSizing: 'border-box', outline: 'none' }}
+            >
+              <option value="Isolation Forest">Isolation Forest (Las Izolacji)</option>
+              <option value="One-Class SVM">One-Class SVM (Wektory Nośne)</option>
+              <option value="LOF">LOF (Analiza Gęstości Sąsiadów)</option>
+            </select>
+          </label>
+
           <div style={{ display: 'flex', gap: '15px', background: '#1a1a1a', padding: '15px', borderRadius: '6px', border: '1px dashed #444', marginTop: '10px' }}>
             <div style={{ flex: 1 }}>
               <label style={{ color: '#aaa', fontSize: '0.85rem' }}>Długość okna:
@@ -267,6 +317,19 @@ export const ZarzadzanieAI = () => {
             <div style={{ flex: 1 }}>
               <label style={{ color: '#aaa', fontSize: '0.85rem' }}>Krok:
                 <input type="number" value={stepSize} onChange={e => setStepSize(Number(e.target.value))} style={{ width: '100%', padding: '8px', background: '#222', color: '#fff', border: '1px solid #444', borderRadius: '4px', marginTop: '5px', boxSizing: 'border-box' }} />
+              </label>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ color: '#aaa', fontSize: '0.85rem' }}>Czułość (0.01 - 0.20):
+                <input 
+                  type="number" 
+                  step="0.01" 
+                  min="0.01" 
+                  max="0.30" 
+                  value={contamination} 
+                  onChange={e => setContamination(Number(e.target.value))} 
+                  style={{ width: '100%', padding: '8px', background: '#222', color: '#fff', border: '1px solid #444', borderRadius: '4px', marginTop: '5px', boxSizing: 'border-box' }} 
+                />
               </label>
             </div>
           </div>
@@ -291,9 +354,9 @@ export const ZarzadzanieAI = () => {
                 <tr style={{ background: '#1a1a1a', borderBottom: '2px solid #444' }}>
                   <th style={{ padding: '12px', textAlign: 'left' }}>Grupa Modeli</th>
                   <th style={{ padding: '12px', textAlign: 'center' }}>Pliki</th>
+                  <th style={{ padding: '12px', textAlign: 'center' }}>Algorytm / Czułość</th>
                   <th style={{ padding: '12px', textAlign: 'center' }}>Okno / Krok</th>
                   <th style={{ padding: '12px', textAlign: 'left' }}>Dostępne osie</th>
-                  {/* NOWOŚĆ: Nagłówek akcji */}
                   <th style={{ padding: '12px', textAlign: 'center' }}>Akcje</th>
                 </tr>
               </thead>
@@ -314,7 +377,13 @@ export const ZarzadzanieAI = () => {
                   >
                     <td style={{ padding: '12px', fontWeight: 'bold', color: selectedGroupToView?.group_id === model.group_id ? '#00ccff' : '#ccc' }}>{model.name}</td>
                     <td style={{ padding: '12px', textAlign: 'center' }}>{model.files_used_count}</td>
-                    <td style={{ padding: '12px', textAlign: 'center', fontFamily: 'monospace' }}>{model.window_size} / {model.step_size}</td>
+                    <td style={{ padding: '12px', textAlign: 'center', fontSize: '0.8rem' }}>
+                      <span style={{ color: '#4caf50' }}>{model.algorithm}</span><br />
+                      <span style={{ color: '#888' }}>({(model.contamination * 100).toFixed(0)}%)</span>
+                    </td>
+                    <td style={{ padding: '12px', textAlign: 'center', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                      {model.window_size} / {model.step_size}
+                    </td>
                     <td style={{ padding: '12px' }}>
                       <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
                         {model.axes_trained.map(ax => (
@@ -322,17 +391,13 @@ export const ZarzadzanieAI = () => {
                         ))}
                       </div>
                     </td>
-                    {/* NOWOŚĆ: Przycisk usuwania wewnątrz tabeli */}
                     <td style={{ padding: '12px', textAlign: 'center' }}>
                       <button 
                         onClick={(e) => { 
-                          e.stopPropagation(); // Ważne: Blokuje rozwinięcie wykresu przy kliknięciu 'Usuń'
+                          e.stopPropagation(); 
                           setModelToDelete(model); 
                         }} 
-                        style={{ 
-                          background: '#f4433622', color: '#f44336', border: '1px solid #f44336', 
-                          padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' 
-                        }}
+                        style={{ background: '#f4433622', color: '#f44336', border: '1px solid #f44336', padding: '6px 12px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}
                       >
                         🗑️ Usuń
                       </button>
@@ -347,7 +412,7 @@ export const ZarzadzanieAI = () => {
         {selectedGroupToView && (
           <div style={{ marginTop: '30px', padding: '20px', background: '#1a1a1a', borderRadius: '8px', border: '1px dashed #444' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h3 style={{ color: '#00ccff', margin: 0 }}>📊 Mapa przestrzeni cech (Wykres Rozrzutu)</h3>
+              <h3 style={{ color: '#00ccff', margin: 0 }}>📊 Mapa przestrzeni cech</h3>
               <select 
                 value={selectedAxisToView} 
                 onChange={(e) => setSelectedAxisToView(e.target.value)}
@@ -357,10 +422,34 @@ export const ZarzadzanieAI = () => {
               </select>
             </div>
 
-            <p style={{ color: '#aaa', fontSize: '0.85rem' }}>
-              Wykres przedstawia korelację pomiędzy "Wariancją uchybu" a "Błędem Średniokwadratowym (RMSE)". 
-              Zielone punkty to norma wyuczona przez AI. Czerwone reprezentują tzw. margines anomalii.
-            </p>
+            <div style={{ display: 'flex', gap: '15px', marginBottom: '20px', background: '#222', padding: '15px', borderRadius: '6px', border: '1px solid #333' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ color: '#ccc', fontSize: '0.85rem' }}>Eksploruj na osi X:
+                  <select 
+                    value={xAxisFeature} 
+                    onChange={(e) => setXAxisFeature(e.target.value)}
+                    style={{ width: '100%', padding: '8px', background: '#111', color: '#00ccff', border: '1px solid #444', borderRadius: '4px', marginTop: '5px', outline: 'none' }}
+                  >
+                    {Object.entries(FEATURE_LABELS).map(([key, label]) => (
+                      <option key={`x-${key}`} value={key}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ color: '#ccc', fontSize: '0.85rem' }}>Eksploruj na osi Y:
+                  <select 
+                    value={yAxisFeature} 
+                    onChange={(e) => setYAxisFeature(e.target.value)}
+                    style={{ width: '100%', padding: '8px', background: '#111', color: '#00ccff', border: '1px solid #444', borderRadius: '4px', marginTop: '5px', outline: 'none' }}
+                  >
+                    {Object.entries(FEATURE_LABELS).map(([key, label]) => (
+                      <option key={`y-${key}`} value={key}>{label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
 
             {isChartLoading ? (
               <p style={{ color: '#ff9800', textAlign: 'center', marginTop: '40px' }}>⏳ Pobieranie pełnej paczki punktów (pre-fetching)...</p>
@@ -369,8 +458,24 @@ export const ZarzadzanieAI = () => {
                 <ResponsiveContainer width="100%" height="100%">
                   <ScatterChart margin={{ top: 20, right: 20, bottom: 40, left: 40 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                    <XAxis type="number" dataKey="var" name="Wariancja uchybu" stroke="#888" tick={{ fill: '#888' }} label={{ value: 'Wariancja uchybu (Oś X)', position: 'bottom', offset: 10, fill: '#aaa' }} />
-                    <YAxis type="number" dataKey="rmse" name="Błąd RMSE" stroke="#888" tick={{ fill: '#888' }} label={{ value: 'Błąd RMSE (Oś Y)', angle: -90, position: 'insideLeft', offset: -20, fill: '#aaa' }} />
+                    
+                    <XAxis 
+                      type="number" 
+                      dataKey={xAxisFeature} 
+                      name={FEATURE_LABELS[xAxisFeature]} 
+                      stroke="#888" 
+                      tick={{ fill: '#888' }} 
+                      label={{ value: `${FEATURE_LABELS[xAxisFeature]} (Oś X)`, position: 'bottom', offset: 10, fill: '#aaa' }} 
+                    />
+                    <YAxis 
+                      type="number" 
+                      dataKey={yAxisFeature} 
+                      name={FEATURE_LABELS[yAxisFeature]} 
+                      stroke="#888" 
+                      tick={{ fill: '#888' }} 
+                      label={{ value: `${FEATURE_LABELS[yAxisFeature]} (Oś Y)`, angle: -90, position: 'insideLeft', offset: -20, fill: '#aaa' }} 
+                    />
+                    
                     <Tooltip cursor={false} contentStyle={{ backgroundColor: '#222', borderColor: '#444', color: '#fff' }} formatter={(value: any, name: any) => {
                         if (name === "prediction") return [value === 1 ? 'Norma (OK)' : 'Anomalia (Awaria)', 'Status'];
                         return [Number(value).toFixed(4), name];
@@ -384,14 +489,11 @@ export const ZarzadzanieAI = () => {
             ) : (
               <p style={{ color: '#ff9800', textAlign: 'center', marginTop: '40px' }}>Brak punktów do wyświetlenia.</p>
             )}
-          </div>
-        )}
-      </div>
-        {/* ---------------- NOWA SEKCJA TESTOWANIA PLIKU ---------------- */}
+
             <div style={{ marginTop: '40px', paddingTop: '30px', borderTop: '2px solid #333' }}>
-              <h3 style={{ color: '#4caf50', margin: '0 0 10px 0' }}>🧪 Symulacja Diagnozy (Zestawienie czasowe)</h3>
+              <h3 style={{ color: '#4caf50', margin: '0 0 10px 0' }}>🧪 Symulacja Diagnozy (Pełny Przegląd Osi)</h3>
               <p style={{ color: '#aaa', fontSize: '0.85rem', marginBottom: '20px' }}>
-                Wybierz dowolny plik z archiwum i sprawdź, jak wyuczony model AI (Isolation Forest) zareaguje na jego uchyb na osi <strong>{selectedAxisToView}</strong>.
+                Wybierz plik awaryjny z listy, aby przetestować go przy użyciu algorytmu <strong>{selectedGroupToView.algorithm}</strong> na wszystkich wytrenowanych osiach robota jednocześnie.
               </p>
 
               <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
@@ -407,75 +509,78 @@ export const ZarzadzanieAI = () => {
                   disabled={isTesting || !testFilePath}
                   style={{ background: isTesting ? '#555' : '#4caf50', color: '#fff', padding: '10px 24px', border: 'none', borderRadius: '4px', cursor: isTesting ? 'wait' : 'pointer', fontWeight: 'bold' }}
                 >
-                  {isTesting ? '⏳ AI Analizuje...' : '🔎 Uruchom Diagnozę AI'}
+                  {isTesting ? '⏳ Analizowanie osi...' : '🔎 Uruchom Diagnozę Pełną'}
                 </button>
               </div>
 
-              {testResults && (
-                <div style={{ marginTop: '30px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                    <h4 style={{ color: '#fff', margin: 0 }}>Wynik na osi {selectedAxisToView}:</h4>
-                    <span style={{ 
-                      background: testResults.anomalyPercent > 0 ? '#f4433622' : '#4caf5022', 
-                      color: testResults.anomalyPercent > 0 ? '#f44336' : '#4caf50', 
-                      padding: '5px 12px', borderRadius: '15px', fontWeight: 'bold' 
-                    }}>
-                      {testResults.anomalyPercent === 0 ? '✅ Idealna praca (Brak awarii)' : `⚠️ Wykryto Anomalię (${testResults.anomalyPercent}%)`}
-                    </span>
+              {/* --- NOWOŚĆ: PASEK POSTĘPU WIDOCZNY W TRAKCIE TESTOWANIA --- */}
+              {isTesting && (
+                <div style={{ marginTop: '20px', background: '#1a1a1a', borderRadius: '6px', padding: '15px', border: '1px solid #444' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ color: '#aaa', fontSize: '0.85rem' }}>Przetwarzanie zapytań ML w chmurze (Promise.all)...</span>
+                    <span style={{ color: '#4caf50', fontWeight: 'bold', fontSize: '0.85rem' }}>{testProgress}%</span>
                   </div>
-
-                  <div style={{ width: '100%', height: '350px', background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333' }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={testResults.chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                        <XAxis dataKey="Time" stroke="#aaa" />
-                        <YAxis stroke="#aaa" />
-                        <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #444', color: '#fff' }} />
-                        <Legend />
-                        
-                        {/* Rysowanie "Czerwonych Stref" (obszary, gdzie AI oflagowało problem) */}
-                        {testResults.violationAreas.map((area, idx) => (
-                          <ReferenceArea key={idx} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} />
-                        ))}
-
-                        <Line type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={2} dot={false} isAnimationActive={false} />
-                        <Line type="monotone" dataKey="Badany" stroke="#ff9800" strokeWidth={2} dot={false} isAnimationActive={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
+                  <div style={{ width: '100%', background: '#111', borderRadius: '10px', height: '8px', overflow: 'hidden' }}>
+                    <div style={{ width: `${testProgress}%`, background: '#4caf50', height: '100%', transition: 'width 0.4s ease-out' }}></div>
                   </div>
                 </div>
               )}
+
+              {testResults && Object.keys(testResults).length > 0 && !isTesting && (
+                <div style={{ marginTop: '30px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  <h4 style={{ color: '#fff', borderBottom: '1px solid #333', paddingBottom: '10px', margin: 0 }}>
+                    Wyniki weryfikacji pliku dla poszczególnych osi:
+                  </h4>
+                  
+                  {Object.entries(testResults).map(([axisName, resultData]) => (
+                    <div key={axisName} style={{ background: '#111', padding: '15px', borderRadius: '8px', border: '1px solid #333' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                        <h4 style={{ color: '#00ccff', margin: 0 }}>Oś: {axisName}</h4>
+                        <span style={{ 
+                          background: resultData.anomalyPercent > 0 ? '#f4433622' : '#4caf5022', 
+                          color: resultData.anomalyPercent > 0 ? '#f44336' : '#4caf50', 
+                          padding: '5px 12px', borderRadius: '15px', fontWeight: 'bold', fontSize: '0.85rem'
+                        }}>
+                          {resultData.anomalyPercent === 0 ? '✅ Idealna praca' : `⚠️ Wykryto Anomalię (${resultData.anomalyPercent}%)`}
+                        </span>
+                      </div>
+
+                      <div style={{ width: '100%', height: '220px' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={resultData.chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                            <XAxis dataKey="Time" stroke="#aaa" />
+                            <YAxis stroke="#aaa" />
+                            <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #444', color: '#fff' }} />
+                            <Legend />
+                            {resultData.violationAreas.map((area: any, idx: number) => (
+                              <ReferenceArea key={idx} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} />
+                            ))}
+                            <Line type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={2} dot={false} isAnimationActive={false} />
+                            <Line type="monotone" dataKey="Badany" stroke="#ff9800" strokeWidth={2} dot={false} isAnimationActive={false} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            {/* ---------------------------------------------------------------------- */}
-      {/* --- NOWOŚĆ: MODAL / POPUP POTWIERDZENIA USUNIĘCIA --- */}
+          </div>
+        )}
+      </div>
+
       {modelToDelete && (
-        <div style={{ 
-          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', 
-          background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', 
-          zIndex: 99999, backdropFilter: 'blur(3px)' 
-        }}>
+        <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 99999, backdropFilter: 'blur(3px)' }}>
           <div style={{ background: '#1a1a1a', padding: '30px', borderRadius: '12px', border: '1px solid #444', maxWidth: '450px', textAlign: 'center', boxShadow: '0 20px 50px rgba(0,0,0,0.8)' }}>
             <h2 style={{ color: '#f44336', marginTop: 0, fontSize: '1.8rem' }}>⚠️ Uwaga!</h2>
             <p style={{ color: '#ddd', fontSize: '1.05rem', lineHeight: '1.5' }}>
               Czy na pewno chcesz bezpowrotnie usunąć wyuczony model:<br/>
               <strong style={{ color: '#00ccff', display: 'block', margin: '15px 0', fontSize: '1.2rem' }}>{modelToDelete.name}</strong>
             </p>
-            <p style={{ color: '#888', fontSize: '0.85rem' }}>
-              Operacja ta jest nieodwracalna. Wszystkie pliki .pkl zostaną wymazane z dysku serwera. Jeśli ten model był przypisany do robota, konieczne będzie wytrenowanie nowego.
-            </p>
             <div style={{ display: 'flex', gap: '15px', justifyContent: 'center', marginTop: '30px' }}>
-              <button 
-                onClick={() => setModelToDelete(null)} 
-                style={{ padding: '12px 25px', background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '1rem', transition: '0.2s' }}
-              >
-                Cofnij
-              </button>
-              <button 
-                onClick={confirmDelete} 
-                style={{ padding: '12px 25px', background: '#f44336', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '1rem', boxShadow: '0 4px 15px rgba(244,67,54,0.4)', transition: '0.2s' }}
-              >
-                🗑️ Usuń model
-              </button>
+              <button onClick={() => setModelToDelete(null)} style={{ padding: '12px 25px', background: '#333', color: '#fff', border: '1px solid #555', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '1rem', transition: '0.2s' }}>Cofnij</button>
+              <button onClick={confirmDelete} style={{ padding: '12px 25px', background: '#f44336', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 'bold', fontSize: '1rem', boxShadow: '0 4px 15px rgba(244,67,54,0.4)', transition: '0.2s' }}>🗑️ Usuń model</button>
             </div>
           </div>
         </div>

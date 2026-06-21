@@ -42,7 +42,9 @@ class TrainModelRequest(BaseModel):
     folder_path: str
     reference_path: str
     window_size: int
-    step_size: int    
+    step_size: int
+    algorithm: str = "Isolation Forest"
+    contamination: float = 0.03
 
 class TestModelReq(BaseModel):
     group_id: str
@@ -80,13 +82,12 @@ def get_ml_sources():
                 refs = [f for f in os.listdir(ref_dir) if f.lower().endswith('.csv')]
             
             data_folders = [item] 
-            test_files = [] # <-- NOWOŚĆ: Lista plików do testowania
+            test_files = []
             
             for sub in os.listdir(item_path):
                 sub_path = os.path.join(item_path, sub)
                 if os.path.isdir(sub_path) and sub not in ["Przebieg_referencyjny"]:
                     data_folders.append(f"{item}/{sub}")
-                    # Pobieranie pojedynczych plików CSV do panelu testowego
                     for f in os.listdir(sub_path):
                         if f.lower().endswith('.csv'):
                             test_files.append(f"{item}/{sub}/{f}")
@@ -95,13 +96,12 @@ def get_ml_sources():
                 "robot_name": item,
                 "data_folders": data_folders,
                 "reference_files": [f"{item}/Przebieg_referencyjny/{r}" for r in refs],
-                "test_files": test_files # <-- Przekazujemy listę do Reacta
+                "test_files": test_files
             })
     return {"sources": sources}
 
 @router.post("/api/ml/test")
 def test_ml_model(req: TestModelReq):
-    # Ścieżki wędrują z Reacta, więc doklejamy je do BASE_DIR
     abs_test = os.path.join(BASE_DIR, req.test_file_path)
     abs_ref = os.path.join(BASE_DIR, req.reference_file_path)
     return ml_engine.evaluate_file(req.group_id, req.axis, abs_test, abs_ref)
@@ -117,7 +117,9 @@ def train_robot_model(req: TrainModelRequest):
         training_folder_path=abs_folder,
         reference_file_path=abs_reference,
         window_size=req.window_size,
-        step_size=req.step_size
+        step_size=req.step_size,
+        contamination=req.contamination,
+        algorithm=req.algorithm
     )
     return result
 
