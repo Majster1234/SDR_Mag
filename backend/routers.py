@@ -1,3 +1,4 @@
+# routers.py
 import os
 import pandas as pd
 from datetime import datetime
@@ -10,9 +11,7 @@ from backend.config import BASE_DIR, DEFAULT_ROBOTS, ROOT_PATH
 import math
 import json
 from typing import Optional, Dict, Any 
-from pydantic import BaseModel
 from backend.ml.ml_engine import ml_engine
-
 
 router = APIRouter()
 
@@ -36,7 +35,6 @@ class SaveAutoDiagReq(BaseModel):
     robot_name: str
     test_file_path: str
 
-# Definiujemy strukturę żądania z frontendu
 class TrainModelRequest(BaseModel):
     model_name: str
     folder_path: str
@@ -108,7 +106,6 @@ def test_ml_model(req: TestModelReq):
 
 @router.post("/api/ml/train")
 def train_robot_model(req: TrainModelRequest):
-    # Mapujemy ścieżki absolutne względem Twojego katalogu BASE_DIR
     abs_folder = os.path.join(BASE_DIR, req.folder_path)
     abs_reference = os.path.join(BASE_DIR, req.reference_path)
     
@@ -130,7 +127,6 @@ def get_ml_models_registry():
 @router.post("/api/file/save-auto-diagnosis")
 def save_auto_diagnosis(req: SaveAutoDiagReq):
     try:
-        # 1. Uruchamiamy diagnostykę, aby pobrać werdykt systemu
         diag_result = run_diagnosis(DiagnoseReq(robot_name=req.robot_name, test_file_path=req.test_file_path))
         
         if "error" in diag_result:
@@ -139,7 +135,6 @@ def save_auto_diagnosis(req: SaveAutoDiagReq):
         global_diag = diag_result.get("globalDiagnosis", {})
         is_failure = global_diag.get("isFailure", False)
         
-        # 2. Mapowanie na konkretne klasy awarii na podstawie komunikatów z systemu
         if not is_failure:
             auto_label = "OK"
         else:
@@ -155,7 +150,6 @@ def save_auto_diagnosis(req: SaveAutoDiagReq):
             else:
                 auto_label = "AWARIA"
 
-        # 3. Zapis statusu do pliku CSV
         full_path = os.path.join(ROOT_PATH, req.test_file_path)
         with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
             first_line = f.readline()
@@ -216,8 +210,6 @@ def get_file_info(req: FilePathReq):
         raise HTTPException(status_code=404, detail="Plik nie istnieje na dysku.")
 
     try:
-        # Zmiana: Używamy getmtime (Data modyfikacji). W przypadku logów przenoszonych
-        # między komputerami, to właśnie ta data zachowuje oryginalny czas zapisu przez robota.
         m_time = os.path.getctime(full_path)
         record_date = datetime.fromtimestamp(m_time).strftime('%Y-%m-%d %H:%M:%S')
 
@@ -226,12 +218,11 @@ def get_file_info(req: FilePathReq):
 
         duration = None
         if 'Time' in df.columns:
-            # Zmiana: Dzielimy przez 1000.0, aby zamienić milisekundy na sekundy
             duration = float(df['Time'].iloc[-1] - df['Time'].iloc[0]) / 1000.0
 
         return {
             "is_valid": True,
-            "record_date": record_date,  # <-- nowa nazwa
+            "record_date": record_date, 
             "columns": columns,
             "duration": duration,
             "rows_count": len(df)
@@ -250,7 +241,6 @@ async def upload_file(file: UploadFile = File(...)):
     with open(file_location, "wb+") as file_object:
         file_object.write(await file.read())
         
-    # NOWE: Zapewnienie istnienia kolumny Auto_Label przy wgrywaniu pliku
     try:
         with open(file_location, 'r', encoding='utf-8', errors='ignore') as f:
             first_line = f.readline()
@@ -275,17 +265,12 @@ def get_file_data(req: FileDataReq):
 
     try:
         df = pd.read_csv(full_path, sep=None, engine='python')
-        
-        # Opcjonalnie: upewniamy się, że nie ma pustych wartości (NaN) w pliku, 
-        # bo format JSON ich nie obsługuje
         df = df.fillna(0)
         
-        # Normalizacja czasu: startujemy od 0.0 sekund i dzielimy przez 1000
         if 'Time' in df.columns:
             start_time = df['Time'].iloc[0]
             df['Time'] = (df['Time'] - start_time) / 1000.0
             
-        # Zamieniamy DataFrame na listę słowników (idealny format dla Recharts)
         data = df.to_dict(orient='records')
         return data
     except Exception as e:
@@ -301,15 +286,12 @@ def calculate_kinematics(req: KinematicsReq):
         return {"error": "Plik nie istnieje"}
 
     try:
-        # ZMIANA: Automatyczne wykrywanie separatora i łatanaie pustych wartości (NaN)
         df = pd.read_csv(file_path, sep=None, engine='python')
         df = df.fillna(0)
         
-        # Filtrujemy tylko kolumny osi
         if not all(col in df.columns for col in ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']):
             return {"error": "Brak kompletnych danych A1-A6"}
 
-        # Definiujemy kinematykę z użyciem Numpy dla prędkości
         d1, a1, a2, a3, d4, d6 = 0.175, 0.260, 0.480, 0.035, 0.570, 0.158
         
         def Tz(d): return np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, d], [0, 0, 0, 1]])
@@ -319,10 +301,9 @@ def calculate_kinematics(req: KinematicsReq):
         def Rx(th): return np.array([[1, 0, 0, 0], [0, np.cos(th), -np.sin(th), 0], [0, np.sin(th), np.cos(th), 0], [0, 0, 0, 1]])
 
         T0 = np.eye(4) @ Tz(0.5)
-
         all_points = []
-        
         np_data = df[['A1', 'A2', 'A3', 'A4', 'A5', 'A6']].to_numpy()
+        
         for row in np_data:
             q = np.radians([row[0]-90, row[1]+90, row[2], row[3], row[4], row[5]])
             
@@ -333,7 +314,6 @@ def calculate_kinematics(req: KinematicsReq):
             T5 = T4 @ Rx(q[4])
             T6 = T5 @ Rz(q[5]) @ Tx(d6)
             
-            # Ekstrakcja pozycji (X, Y, Z) z macierzy
             points = [T[:3, 3].tolist() for T in [T0, T1, T2, T3, T4, T5, T6]]
             all_points.append(points)
 
@@ -370,35 +350,30 @@ def api_set_reference(req: FileActionReq):
 
 @router.post("/api/robot-info")
 def get_robot_info(req: RobotInfoReq):
-    # Ścieżka do wybranego robota (np. Roboty/Robot_1)
     robot_path = os.path.join(ROOT_PATH, BASE_DIR, req.robot_name)
     if not os.path.exists(robot_path):
         raise HTTPException(status_code=404, detail="Robot nie istnieje.")
     
-    # Szukamy folderu referencyjnego
     ref_dir = os.path.join(robot_path, "Przebieg_referencyjny")
     ref_file_info = None
     
     if os.path.exists(ref_dir):
-        # Pobieramy pierwszy plik z folderu
         files = [f for f in os.listdir(ref_dir) if os.path.isfile(os.path.join(ref_dir, f))]
         if files:
             ref_file_name = files[0]
             ref_file_path = os.path.join(ref_dir, ref_file_name)
             
             try:
-                # 1. Data dodania (modyfikacji)
                 m_time = os.path.getmtime(ref_file_path)
                 record_date = datetime.fromtimestamp(m_time).strftime('%Y-%m-%d %H:%M:%S')
                 duration = None
                 
-                # 2. Czas trwania z Pandas (jeśli plik jest poprawnym CSV)
                 try:
                     df = pd.read_csv(ref_file_path, sep=None, engine='python')
                     if 'Time' in df.columns:
                         duration = float(df['Time'].iloc[-1] - df['Time'].iloc[0]) / 1000.0
                 except Exception:
-                    pass # Zignoruj błąd z Pandas, zwrócimy chociaż datę
+                    pass
                 rel_ref_path = os.path.join(BASE_DIR, req.robot_name, "Przebieg_referencyjny", ref_file_name).replace("\\", "/")
                 ref_file_info = {
                     "name": ref_file_name,
@@ -415,7 +390,7 @@ def get_robot_info(req: RobotInfoReq):
     return {
         "robot_name": req.robot_name,
         "ref_file_info": ref_file_info,
-        "config": robot_config  # <-- Zwracamy to do Frontendu!
+        "config": robot_config 
     }
 
 
@@ -425,7 +400,6 @@ class DiagnoseReq(BaseModel):
     override_config: Optional[Dict[str, Any]] = None
 
 def safe_float(val, default=0.0):
-    """Bezpieczne rzutowanie na float, chroni przed wartościami None (null z JSON)"""
     try:
         return float(val) if val is not None else default
     except (ValueError, TypeError):
@@ -438,18 +412,12 @@ def set_file_status(req: FileStatusReq):
         raise HTTPException(status_code=404, detail="Plik nie istnieje na dysku.")
 
     try:
-        # Odczyt separatora
         with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
             first_line = f.readline()
             sep = ';' if ';' in first_line else ','
 
-        # Wczytujemy plik
         df = pd.read_csv(full_path, sep=sep, engine='python')
-        
-        # Tworzymy lub nadpisujemy kolumnę Label
         df['Label'] = req.status
-        
-        # Zapisujemy plik zachowując oryginalny separator, bez indeksów
         df.to_csv(full_path, sep=sep, index=False)
 
         return {"message": f"Status zaktualizowany na {req.status}"}
@@ -477,7 +445,6 @@ def run_diagnosis(req: DiagnoseReq):
         return {"error": "Brak pliku badanego."}
         
     try:
-        # 1. Błyskawiczne wykrycie separatora
         with open(ref_file_path, 'r', encoding='utf-8', errors='ignore') as f:
             sep_ref = ';' if ';' in f.readline() else ','
         with open(test_file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -489,21 +456,26 @@ def run_diagnosis(req: DiagnoseReq):
         df_ref.columns = df_ref.columns.str.strip()
         df_test.columns = df_test.columns.str.strip()
         
-        # Szybka konwersja (polskie przecinki)
+        # --- ZMIANA 1: ODCZYTANIE PRAWDZIWEGO STATUSU MANUALNEGO ---
+        manual_label = "NIEZNANY"
+        if 'Label' in df_test.columns:
+            val = str(df_test['Label'].iloc[0]).strip().upper()
+            if val in ['OK', 'AWARIA', 'NIEZNANY']:
+                manual_label = val
+
         for df in (df_ref, df_test):
             obj_cols = df.select_dtypes(include=['object']).columns
             for c in obj_cols:
                 df[c] = pd.to_numeric(df[c].str.replace(',', '.'), errors='coerce')
             df.fillna(0, inplace=True)
             
-        cols = [c for c in df_ref.columns if (c.startswith('A') and c != 'Auto_Label') or c.startswith('Cur')]
+        cols = [c for c in df_ref.columns if (c.startswith('A') and c not in ['Auto_Label', 'Label']) or c.startswith('Cur')]
         cols.sort(key=lambda x: (x.startswith('Cur'), x))
         
         min_len = min(len(df_ref), len(df_test))
         df_ref = df_ref.iloc[:min_len].copy()
         df_test = df_test.iloc[:min_len].copy()
         
-        # 2. NAPRAWA CZASU (dt): Skalowanie do sekund (dzieli przez 1000) tak jak na frontendzie
         time_col = next((c for c in df_ref.columns if 'time' in c.lower() or 'czas' in c.lower()), None)
         if time_col:
             start_time = float(df_ref[time_col].iloc[0])
@@ -523,26 +495,21 @@ def run_diagnosis(req: DiagnoseReq):
         statsData = {}
 
         errors = {"MAE": {}, "MSE": {}, "IAE": {}, "ISE": {}}
-        # NOWE: Słownik flag przekroczeń limitów, liczony na backendzie
         exceeded_limits = {"MAE": {}, "MSE": {}, "IAE": {}, "ISE": {}}
-        # Inicjalizacja słowników na wyliczone dynamicznie progi
         calculated_thresholds = {"MAE": {}, "MSE": {}, "IAE": {}, "ISE": {}}
         
-        # ZMIANA: Parametry to teraz SKALARY, a nie sztywne progi
         mae_scalar = safe_float(config.get("mae_threshold"), 1.0)
         mse_scalar = safe_float(config.get("mse_threshold"), 1.0)
         iae_scalar = safe_float(config.get("iae_threshold"), 1.0)
         ise_scalar = safe_float(config.get("ise_threshold"), 1.0)
         calculated_stats = {}
+        
         for col in cols:
             is_a = col.startswith('A')
-            
-            # Pobieramy r_vals, t_vals i err
             r_vals = df_ref[col].values
             t_vals = df_test[col].values
             err = t_vals - r_vals
             
-            # 1. Klasyczne Wskaźniki (Przywracamy twarde progi z konfiguracji)
             errors["MAE"][col] = float(np.abs(err).mean())
             errors["MSE"][col] = float((err**2).mean())
             errors["IAE"][col] = float(np.sum(np.abs(err) * dt))
@@ -556,26 +523,19 @@ def run_diagnosis(req: DiagnoseReq):
             else:
                 for k in exceeded_limits: exceeded_limits[k][col] = False
 
-            # 2. LOGIKA TUNELU (Dodajemy tryb Statystyka)
             if diag_type == 'Odchylenia':
-            # Domyślnie używamy 'okno', aby nie popsuć Twoich starych konfiguracji
                 tuning_mode = config.get('tuning_mode', 'okno') 
                 dev_thr = safe_float(config.get('a_deviation_threshold' if is_a else 'cur_deviation_threshold'), 2.0)
                 deadband = safe_float(config.get('a_deadband_threshold' if is_a else 'cur_deadband_threshold'), 0.05)
             
                 if tuning_mode == 'srednia':
-                    # 1. Procent ze średniej globalnej
                     global_mean = np.abs(r_vals).mean()
                     base_margin = np.full(min_len, global_mean * (dev_thr / 100.0), dtype=float)
                     margin = np.maximum(base_margin, deadband)
-                    
                 elif tuning_mode == 'chwilowy':
-                    # 2. Sztywny próg dla każdej próbki (traktowany jako wartość absolutna / punkty procentowe)
                     base_margin = np.full(min_len, dev_thr, dtype=float)
                     margin = np.maximum(base_margin, deadband)
-                    
                 else:
-                    # 3. 'okno' - Twój oryginalny kod (Koperta z 11 próbek)
                     rolling_max = pd.Series(r_vals).abs().rolling(window=11, center=True, min_periods=1).max().values
                     margin = np.maximum(rolling_max * (dev_thr / 100.0), deadband)
                 
@@ -584,34 +544,27 @@ def run_diagnosis(req: DiagnoseReq):
                 margin = np.full(min_len, off_thr, dtype=float)
                 
             elif diag_type == 'Statystyka':
-                # NOWY TRYB: Zasada k-Sigma (Domyślnie 3)
                 k = safe_float(config.get("sigma_multiplier"), 3.0)
                 std_val = np.std(err)
                 margin = np.full(min_len, k * std_val, dtype=float)
                 
-                # Zapisujemy wyliczone parametry do wyświetlenia na froncie
                 calculated_stats[col] = {
                     "sigma": float(std_val),
                     "limit": float(k * std_val)
                 }
             else:
-                # 3. Wskaźniki matematyczne (brak tunelu na wykresach)
                 margin = np.zeros(min_len, dtype=float)
-            # ----------------------------------------------------------------
                 
             up_limit = r_vals + margin
             low_limit = r_vals - margin
             
-            # Sprawdzanie przekroczeń tylko w trybach o to opartych
             if diag_type in ['Odchylenia', 'Odchylenie (offsetowe)','Statystyka']:
                 is_out = (t_vals > up_limit) | (t_vals < low_limit)
                 violation_percents[col] = float(is_out.mean() * 100)
             else:
-                # W trybie Wskaźników tunel i procent błędu nie istnieją
                 is_out = np.zeros(min_len, dtype=bool)
                 violation_percents[col] = 0.0
                 
-            # 1. SZUKANIE OBSZARÓW BŁĘDÓW (do czerwonych stref na wykresach)
             out_indices = np.where(is_out)[0]
             areas = []
             if len(out_indices) > 0:
@@ -622,7 +575,6 @@ def run_diagnosis(req: DiagnoseReq):
                     areas.append({"start": round(float(times[s]), 3), "end": round(float(times[e]), 3)})
             violation_areas[col] = areas
 
-            # 2. TWORZENIE RAMKI DANYCH (tej której brakowało)
             temp_df = pd.DataFrame({
                 "Time": np.round(times, 3),
                 "Referencja": np.round(r_vals, 4),
@@ -631,11 +583,8 @@ def run_diagnosis(req: DiagnoseReq):
                 "LowerLimit": np.round(low_limit, 4),
                 "Roznica": np.round(err, 4)
             })
-                
-            # 3. FORMATOWANIE DO JSON
             chart_data[col] = temp_df.to_dict(orient='records')
         
-        # GLOBALNY WERDYKT
         is_failure = False
         worst_axis = ""
         max_error = -1.0
@@ -643,12 +592,10 @@ def run_diagnosis(req: DiagnoseReq):
         failure_reason = "" 
         
         if diag_type == "Wskaźniki":
-            # Hierarchia usterek: ISE (Kolizje) > MSE (Drgania) > IAE (Zużycie) > MAE (Kalibracja)
             metrics_priority = [("ISE", "KOLIZJA / SZARPNIĘCIE"), 
                                 ("MSE", "NIESTABILNOŚĆ / DRGANIA"), 
                                 ("IAE", "ZUŻYCIE MECHANICZNE"), 
                                 ("MAE", "BŁĄD KALIBRACJI")]
-            
             for metric, reason_prefix in metrics_priority:
                 for col in cols:
                     if exceeded_limits[metric][col]:
@@ -658,14 +605,9 @@ def run_diagnosis(req: DiagnoseReq):
                         limit_val = calculated_thresholds[metric][col]
                         failure_reason = f"{reason_prefix}: Przekroczono limit 3σ na osi {col} (Wartość: {round(max_error, 2)} > Limit: {round(limit_val, 2)})"
                         break
-                if is_failure:
-                    break
-                        
-            if not is_failure:
-                failure_reason = "Wszystkie wskaźniki w normie (poniżej progu 3σ)"
-                
+                if is_failure: break
+            if not is_failure: failure_reason = "Wszystkie wskaźniki w normie (poniżej progu 3σ)"
         else:
-            # Stara logika dla odchyleń procentowych / offsetowych
             max_viol_thr = safe_float(config.get("max_violation_threshold"), 5.0)
             error_unit = "%"
             for col in cols:
@@ -674,10 +616,8 @@ def run_diagnosis(req: DiagnoseReq):
                     max_error = val
                     worst_axis = col
             is_failure = max_error >= max_viol_thr
-            if is_failure:
-                failure_reason = f"PRZEKROCZENIE TOLERANCJI: {round(max_error, 2)}% błędu na osi {worst_axis}"
-            else:
-                failure_reason = "Przejazd w tunelu tolerancji"
+            if is_failure: failure_reason = f"PRZEKROCZENIE TOLERANCJI: {round(max_error, 2)}% błędu na osi {worst_axis}"
+            else: failure_reason = "Przejazd w tunelu tolerancji"
             
         global_diag = {
             "isFailure": bool(is_failure),
@@ -685,7 +625,7 @@ def run_diagnosis(req: DiagnoseReq):
             "maxError": float(max_error),
             "diagType": diag_type,
             "errorUnit": error_unit,
-            "failureReason": failure_reason # Wysyłamy string z powodem na Front!
+            "failureReason": failure_reason 
         }
         
         a_cols = [c for c in cols if c.startswith('A')]
@@ -699,10 +639,11 @@ def run_diagnosis(req: DiagnoseReq):
         
         return {
             "globalDiagnosis": global_diag,
+            "manualLabel": manual_label, # <--- WYSYŁAMY LABEL NA FRONTEND
             "statsData": {
                 "errors": errors, 
                 "exceededLimits": exceeded_limits, 
-                "calculatedThresholds": calculated_thresholds, # NOWE: Przekazujemy progi na Front
+                "calculatedThresholds": calculated_thresholds, 
                 "aCols": a_cols, 
                 "curCols": cur_cols, 
                 "maxes": maxes, 
@@ -715,8 +656,6 @@ def run_diagnosis(req: DiagnoseReq):
             "columns": cols,
             "usedConfig": config  
         }
-    
-        
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -750,11 +689,9 @@ def run_batch_diagnosis(req: BatchDiagnoseReq):
         if os.path.isfile(abs_path) and file_name.lower().endswith(".csv") and "referenc" not in file_name.lower():
             file_rel_path = f"{req.folder_path}/{file_name}" if not req.folder_path.startswith(base_dir_name + "/") else f"{clean_folder_path}/{file_name}"
 
-            print(f"[{file_name}] Ścieżka absolutna do wstrzyknięcia: {abs_path}")
-            
             single_req = DiagnoseReq(
                 robot_name=req.robot_name,
-                test_file_path=abs_path.replace("\\", "/"),  # Twarda ścieżka absolutna
+                test_file_path=abs_path.replace("\\", "/"), 
                 override_config=req.override_config
             )
             
@@ -765,35 +702,24 @@ def run_batch_diagnosis(req: BatchDiagnoseReq):
                     g_diag = diag_res.get("globalDiagnosis", {})
                     s_data = diag_res.get("statsData", {})
                     
-                    # 1. WYDRUK DIAGNOSTYCZNY SUB-KLUCZY (Żebyśmy widzieli strukturę jak na dłoni)
-                    print(f"[{file_name}]")
-                    print(f"  -> globalDiagnosis: {list(g_diag.keys()) if isinstance(g_diag, dict) else g_diag}")
-                    print(f"  -> statsData: {list(s_data.keys()) if isinstance(s_data, dict) else 'nie jest słownikiem'}")
-                    
-                    # 2. INTELIGENTNE WYCIĄGANIE STATUSÓW (camelCase + snake_case)
-                    manual_label = "BRAK"
                     auto_label = "BRAK"
                     if isinstance(g_diag, dict):
-                        # System zwraca wartość boolean (True/False) w kluczu 'isFailure'
                         is_failure = g_diag.get("isFailure")
-                        if is_failure is True:
-                            auto_label = "AWARIA"
-                        elif is_failure is False:
-                            auto_label = "OK"
+                        if is_failure is True: auto_label = "AWARIA"
+                        elif is_failure is False: auto_label = "OK"
 
-                    # Status manualny "zgadujemy" na podstawie ścieżki (jeśli w nazwie folderu lub pliku jest słowo awaria)
-                    path_lower = file_rel_path.lower()
-                    if "awaria" in path_lower or "bad" in path_lower or "error" in path_lower:
-                        manual_label = "AWARIA"
-                    elif "ok" in path_lower or "good" in path_lower or "referenc" in path_lower:
-                        manual_label = "OK"
-                    else:
-                        manual_label = "NIEZNANY" # Jeśli w ścieżce (np. "Archiwum") nie ma informacji
+                    # --- ZMIANA 2: WYKORZYSTANIE ODŁOWIONEGO LABELA ---
+                    manual_label = diag_res.get("manualLabel", "NIEZNANY")
                     
-                    # 3. INTELIGENTNE WYCIĄGANIE PROCENTÓW AWARII PER KOLUMNA
+                    # Jeśli z jakiegoś powodu plik nie miał kolumny, wracamy do domyślnego zgadywania
+                    if manual_label == "NIEZNANY":
+                        path_lower = file_rel_path.lower()
+                        if "awaria" in path_lower or "bad" in path_lower or "error" in path_lower:
+                            manual_label = "AWARIA"
+                        elif "ok" in path_lower or "good" in path_lower or "referenc" in path_lower:
+                            manual_label = "OK"
+                    
                     violation_percents = {}
-                    
-                    # Sprawdzamy czy są bezpośrednio pod ogólnymi kluczami procentowymi
                     if isinstance(s_data, dict) and "violationPercents" in s_data:
                         violation_percents = s_data["violationPercents"]
                     elif isinstance(s_data, dict) and "violation_percents" in s_data:
@@ -801,17 +727,14 @@ def run_batch_diagnosis(req: BatchDiagnoseReq):
                     elif isinstance(diag_res, dict) and "violationPercents" in diag_res:
                         violation_percents = diag_res["violationPercents"]
                     else:
-                        # Przeszukujemy strukturę parametrów sygnałów (signalParams -> col)
                         if isinstance(s_data, dict) and "signalParams" in s_data:
                             sig_params = s_data["signalParams"]
                             for col in diag_res.get("columns", []):
                                 if col in sig_params and isinstance(sig_params[col], dict):
                                     col_data = sig_params[col]
-                                    # Wyciągamy bezpośredni procent lub szukamy głębiej w statystykach surowych (raw)
                                     val = col_data.get("violationPercent", col_data.get("violation_percent"))
                                     if val is None and "raw" in col_data and isinstance(col_data["raw"], dict):
                                         val = col_data["raw"].get("violationPercent", col_data["raw"].get("violation_percent"))
-                                    
                                     violation_percents[col] = float(val) if val is not None else 0.0
                     
                     results.append({
@@ -828,5 +751,3 @@ def run_batch_diagnosis(req: BatchDiagnoseReq):
     results = sorted(results, key=lambda x: x["file_name"])
     print(f"--- Zakończono. Przekazano {len(results)} plików do tabeli! ---\n")
     return {"batch_results": results}
-
-    
