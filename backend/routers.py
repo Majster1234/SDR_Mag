@@ -181,15 +181,45 @@ def get_robot_config(robot_name: str):
     configs = load_robot_configs()
     return configs.get(robot_name, {"description": "", "model": "", "location": ""})
 
+# --- ZAKTUALIZOWANY ENDPOINT DO ZAPISU I ZMIANY NAZWY ---
 @router.post("/api/robot-config/{robot_name}")
 def update_robot_config(robot_name: str, config: Dict[str, Any]):
     configs = load_robot_configs()
-    if robot_name not in configs:
-        configs[robot_name] = {}
     
-    configs[robot_name].update(config)
+    # Wyciągamy z payloadu docelową nazwę (jeśli nie ma, zostaje stara)
+    new_robot_name = config.pop("new_robot_name", robot_name).strip()
+    
+    if not new_robot_name:
+        raise HTTPException(status_code=400, detail="Nazwa robota nie może być pusta.")
+        
+    # 1. ZMIANA NAZWY FOLDERU NA DYSKU
+    if new_robot_name != robot_name:
+        old_path = os.path.join(BASE_DIR, robot_name)
+        new_path = os.path.join(BASE_DIR, new_robot_name)
+        
+        if os.path.exists(new_path):
+            raise HTTPException(status_code=400, detail="Robot (folder) o takiej nazwie już istnieje na dysku.")
+            
+        if os.path.exists(old_path):
+            try:
+                os.rename(old_path, new_path)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Błąd systemu podczas zmiany nazwy folderu: {str(e)}")
+        
+        # 2. PRZEPIĘCIE KONFIGURACJI W PLIKU JSON
+        if robot_name in configs:
+            configs[new_robot_name] = configs.pop(robot_name)
+        else:
+            configs[new_robot_name] = {}
+    else:
+        if robot_name not in configs:
+            configs[robot_name] = {}
+    
+    # 3. ZAPIS RESZTY PARAMETRÓW (Limity, AI, Model KUKA)
+    configs[new_robot_name].update(config)
     save_robot_configs(configs)
-    return {"message": "Zapisano pomyślnie"}
+    
+    return {"message": "Zapisano pomyślnie", "new_robot_name": new_robot_name}
 
 @router.get("/api/robots")
 def get_robots_tree():

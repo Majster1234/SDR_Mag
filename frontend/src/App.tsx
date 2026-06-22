@@ -12,35 +12,44 @@ function App() {
   const [activeModule, setActiveModule] = useState('podglad_danych');
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
 
-  // --- NOWE STANY DO ZMIANY SZEROKOŚCI DRZEWKA ---
+  // --- STANY DO ZMIANY SZEROKOŚCI DRZEWKA ---
   const [sidebarWidth, setSidebarWidth] = useState(300);
   const [isResizing, setIsResizing] = useState(false);
 
-  // Logika przeciągania myszką
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
-      let newWidth = e.clientX;
-      if (newWidth < 200) newWidth = 200; // Minimalna szerokość drzewka
-      if (newWidth > 800) newWidth = 800; // Maksymalna szerokość drzewka
-      setSidebarWidth(newWidth);
+  // --- NOWA, KULOODPORNA LOGIKA PRZECIĄGANIA MYSZKĄ ---
+  const handleSidebarResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault(); // Blokuje irytujące zaznaczanie tekstu na niebiesko
+    setIsResizing(true); // Włącza zielony kolor paska
+    
+    // Zmieniamy kursor w całym oknie przeglądarki, żeby nie mrugał przy szybkim ruchu
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const newWidth = startWidth + (moveEvent.clientX - startX);
+      // Zabezpieczenie: min 200px, max 800px szerokości sidebaru
+      setSidebarWidth(Math.max(200, Math.min(newWidth, 800))); 
     };
 
     const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-
-    // Jeśli zaczęliśmy ciągnąć, nasłuchujemy ruchów myszy w całym oknie
-    if (isResizing) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
-    }
-
-    return () => {
+      setIsResizing(false); // Wyłącza zielony kolor
+      
+      // Sprzątamy "nasłuchiwacze" po puszczeniu klawisza myszy
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      
+      // Przywracamy domyślne zachowanie strony
+      document.body.style.userSelect = 'auto';
+      document.body.style.cursor = 'default';
     };
-  }, [isResizing]);
+
+    // Przypinamy nasłuchiwanie do CAŁEGO DOKUMENTU, a nie tylko do małego paska
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  };
 
   const fetchTree = async () => {
     try {
@@ -80,9 +89,8 @@ function App() {
     <div style={{ 
       display: 'flex', 
       height: '100vh', 
-      width: '100%', // ZMIANA Z 100vw na 100%
-      fontFamily: 'sans-serif',
-      cursor: isResizing ? 'col-resize' : 'default' 
+      width: '100%',
+      fontFamily: 'sans-serif'
     }}>
       <Sidebar 
         treeData={treeData} 
@@ -91,21 +99,23 @@ function App() {
         activeModule={activeModule}
         selectedFilePath={selectedFilePath}
         onFileSelect={(path) => setSelectedFilePath(path)}
-        width={sidebarWidth} // Przekazujemy szerokość do drzewka
+        width={sidebarWidth}
       />
       
       {/* PASEK DO ZMIANY SZEROKOŚCI (RESIZER) */}
       <div 
-        onMouseDown={() => setIsResizing(true)}
+        onMouseDown={handleSidebarResizeStart} // Podpinamy nową logikę tutaj!
         style={{
           width: '5px',
           cursor: 'col-resize',
-          backgroundColor: isResizing ? '#4caf50' : '#444', // Podświetla się na zielono przy kliknięciu
+          backgroundColor: isResizing ? '#4caf50' : '#2a2a2a', 
           zIndex: 10,
-          transition: 'background-color 0.2s'
+          transition: 'background-color 0.2s',
+          borderLeft: '1px solid #111',
+          borderRight: '1px solid #111'
         }}
-        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isResizing ? '#4caf50' : '#666'}
-        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isResizing ? '#4caf50' : '#444'}
+        onMouseEnter={(e) => { if(!isResizing) e.currentTarget.style.backgroundColor = '#444' }}
+        onMouseLeave={(e) => { if(!isResizing) e.currentTarget.style.backgroundColor = '#2a2a2a' }}
       />
 
       <MainPanel 

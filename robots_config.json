@@ -47,5 +47,24 @@
         "mae_threshold": 1,
         "mse_threshold": 1,
         "sigma_multiplier": 1
+    },
+    "Robot_szkoleniowy": {
+        "model": "KUKA KR C4 (Kontroler)",
+        "location": "",
+        "diagnosis_type": "Wskaźniki",
+        "ai_model_id": "",
+        "max_violation_threshold": 5,
+        "a_deviation_threshold": 2,
+        "cur_deviation_threshold": 2,
+        "a_deadband_threshold": 0.05,
+        "cur_deadband_threshold": 0.05,
+        "tuning_mode": "okno",
+        "a_offset_threshold": 0.1,
+        "cur_offset_threshold": 5,
+        "sigma_multiplier": 3,
+        "mae_threshold": 1,
+        "mse_threshold": 1,
+        "iae_threshold": 50,
+        "ise_threshold": 100
     }
 }
