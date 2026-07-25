@@ -1002,8 +1002,17 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                     <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#555" tick={{fontSize: 11}} label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#888', fontSize: 11 }} />
                     <YAxis width={62} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 11}} label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#555', fontSize: 12 }} />
                     
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#333', borderRadius: '6px' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any) => [`${Number(v).toFixed(2)} ${unit}`, 'Δ Różnica']} />
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#333', borderRadius: '6px' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => {
+                      const strName = String(name);
+                      if (strName === "DiffUpper" || strName === "DiffLower") return [`${Number(v).toFixed(2)} ${unit}`, 'Limit tolerancji'];
+                      return [`${Number(v).toFixed(2)} ${unit}`, 'Δ Różnica'];
+                    }} />
                     {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.2} strokeOpacity={0} />))}
+                    
+                    {/* ZROBIONO: Limity przeniesione na wykres różnic */}
+                    <Line name="DiffUpper" type="stepAfter" dataKey="DiffUpper" stroke="#555" strokeDasharray="4 4" dot={false} strokeOpacity={0.8} isAnimationActive={false} legendType="none" />
+                    <Line name="DiffLower" type="stepAfter" dataKey="DiffLower" stroke="#555" strokeDasharray="4 4" dot={false} strokeOpacity={0.8} isAnimationActive={false} legendType="none" />
+                    
                     <Line name="Δ Odchylenie (Badany - Ref)" type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={1.5} dot={false} isAnimationActive={false} />
                     {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0} fill="#2196f3" fillOpacity={0.2} />}
                   </LineChart>

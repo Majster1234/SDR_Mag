@@ -611,11 +611,13 @@ def run_diagnosis(req: DiagnoseReq):
             else:
                 margin = np.zeros(min_len, dtype=float)
                 
+            # Limity graficzne dla wykresów pozostają nietknięte
             up_limit = r_vals + margin
             low_limit = r_vals - margin
             
-            if diag_type in ['Odchylenia', 'Odchylenie (offsetowe)','Statystyka']:
-                is_out = (t_vals > up_limit) | (t_vals < low_limit)
+            if diag_type in ['Odchylenia', 'Odchylenie (offsetowe)', 'Statystyka']:
+                # NOWA LOGIKA: Sprawdzamy, czy bezwzględna wartość błędu przekracza margines
+                is_out = np.abs(err) > margin
                 violation_percents[col] = float(is_out.mean() * 100)
             else:
                 is_out = np.zeros(min_len, dtype=bool)
@@ -637,7 +639,9 @@ def run_diagnosis(req: DiagnoseReq):
                 "Badany": np.round(t_vals, 4),
                 "UpperLimit": np.round(up_limit, 4),
                 "LowerLimit": np.round(low_limit, 4),
-                "Roznica": np.round(err, 4)
+                "Roznica": np.round(err, 4),
+                "DiffUpper": np.round(margin, 4),    # Dodatni margines na wykres różnic
+                "DiffLower": np.round(-margin, 4)
             })
             chart_data[col] = temp_df.to_dict(orient='records')
         
