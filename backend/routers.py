@@ -172,6 +172,34 @@ def load_robot_configs():
             return {}
     return {}
 
+def load_robot_data(file_path):
+    temperatures = {}
+    skip_lines = 0
+    sep = ','
+    
+    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        for idx, line in enumerate(f):
+            if line.startswith('# Temp Start'):
+                # Parsowanie np: "# Temp Start [C] | A1:342.0 | A2:365.0 | A3:301.0"
+                parts = line.split('|')[1:]
+                for part in parts:
+                    if ':' in part:
+                        axis, val = part.split(':')
+                        try:
+                            # Dzielimy przez 10 zgodnie z rozdzielczością KUKA
+                            temperatures[axis.strip()] = float(val.strip()) / 10.0
+                        except ValueError:
+                            pass
+            # Szukamy pierwszej linii z danymi/nagłówkami, która NIE JEST komentarzem
+            elif not line.startswith('#') and len(line.strip()) > 0:
+                sep = ';' if ';' in line else ','
+                skip_lines = idx
+                break
+                
+    # Wczytujemy plik pomijając preambułę (skiprows)
+    df = pd.read_csv(file_path, sep=sep, skiprows=skip_lines, engine='python')
+    return df, temperatures
+
 def save_robot_configs(data):
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
@@ -243,7 +271,7 @@ def get_file_info(req: FilePathReq):
         m_time = os.path.getctime(full_path)
         record_date = datetime.fromtimestamp(m_time).strftime('%Y-%m-%d %H:%M:%S')
 
-        df = pd.read_csv(full_path, sep=None, engine='python')
+        df, temps = load_robot_data(full_path)
         columns = df.columns.tolist()
 
         duration = None
@@ -255,7 +283,8 @@ def get_file_info(req: FilePathReq):
             "record_date": record_date, 
             "columns": columns,
             "duration": duration,
-            "rows_count": len(df)
+            "rows_count": len(df),
+            "temperatures": temps
         }
     except Exception as e:
         return {
@@ -294,7 +323,7 @@ def get_file_data(req: FileDataReq):
         raise HTTPException(status_code=404, detail="Plik nie istnieje.")
 
     try:
-        df = pd.read_csv(full_path, sep=None, engine='python')
+        df, _ = load_robot_data(full_path)
         df = df.fillna(0)
         
         if 'Time' in df.columns:
@@ -316,7 +345,7 @@ def calculate_kinematics(req: KinematicsReq):
         return {"error": "Plik nie istnieje"}
 
     try:
-        df = pd.read_csv(file_path, sep=None, engine='python')
+        df, _ = load_robot_data(file_path)
         df = df.fillna(0)
         
         if not all(col in df.columns for col in ['A1', 'A2', 'A3', 'A4', 'A5', 'A6']):
@@ -475,13 +504,10 @@ def run_diagnosis(req: DiagnoseReq):
         return {"error": "Brak pliku badanego."}
         
     try:
-        with open(ref_file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            sep_ref = ';' if ';' in f.readline() else ','
-        with open(test_file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            sep_test = ';' if ';' in f.readline() else ','
+        # Używamy nowej funkcji, która wyciągnie df oraz słownik temperatur
+        df_ref, ref_temps = load_robot_data(ref_file_path)
+        df_test, test_temps = load_robot_data(test_file_path)
             
-        df_ref = pd.read_csv(ref_file_path, sep=sep_ref)
-        df_test = pd.read_csv(test_file_path, sep=sep_test)
         
         df_ref.columns = df_ref.columns.str.strip()
         df_test.columns = df_test.columns.str.strip()
@@ -670,6 +696,8 @@ def run_diagnosis(req: DiagnoseReq):
         return {
             "globalDiagnosis": global_diag,
             "manualLabel": manual_label, # <--- WYSYŁAMY LABEL NA FRONTEND
+            "testTemps": test_temps, 
+            "refTemps": ref_temps,
             "statsData": {
                 "errors": errors, 
                 "exceededLimits": exceeded_limits, 
@@ -766,12 +794,13 @@ def run_batch_diagnosis(req: BatchDiagnoseReq):
                                     if val is None and "raw" in col_data and isinstance(col_data["raw"], dict):
                                         val = col_data["raw"].get("violationPercent", col_data["raw"].get("violation_percent"))
                                     violation_percents[col] = float(val) if val is not None else 0.0
-                    
+                    test_temps = diag_res.get("testTemps", {})
                     results.append({
                         "file_name": file_name,
                         "manual_label": manual_label,
                         "auto_label": auto_label,
-                        "violation_percents": violation_percents
+                        "violation_percents": violation_percents,
+                        "test_temps": test_temps
                     })
                 else:
                     print(f"[{file_name}] Pominięto błąd: {diag_res['error']}")

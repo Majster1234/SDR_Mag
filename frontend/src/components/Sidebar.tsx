@@ -318,9 +318,11 @@ export const Sidebar = ({
   const listKey = breadcrumbPaths.join('/') || 'root';
 
   return (
-    // Zmniejszone paddingi górne i boczne
-    <div className="sidebar-container" style={{ width: `${width}px`, backgroundColor: '#181818', padding: '12px 6px', overflowY: 'auto', display: 'flex', flexDirection: 'column', flexShrink: 0, borderRight: '1px solid #2a2a2a' }}>
+    <div className="sidebar-container" style={{ width: `${width}px`, backgroundColor: '#181818', padding: '12px 6px 0 6px', overflow: 'hidden', display: 'flex', flexDirection: 'column', flexShrink: 0, borderRight: '1px solid #2a2a2a' }}>
       <style>{globalStyles}</style>
+
+      {/* Kontener dla części statycznej (Nagłówek, input, breadcrumbs) */}
+      <div style={{ flexShrink: 0 }}>
 
       {/* --- NAGŁÓWEK --- */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px', padding: '0 4px' }}>
@@ -331,6 +333,7 @@ export const Sidebar = ({
           <path className="triangle-path" d="M3 18 L12 3" />
         </svg>
       </div>
+    </div>
       
       {/* --- KOMPAKTOWE DODAWANIE ROBOTA --- */}
       <div style={{ 
@@ -369,8 +372,9 @@ export const Sidebar = ({
         })}
       </div>
 
-      {/* --- LISTA ELEMENTÓW Z ZEROWYMI MARGINESAMI --- */}
-      <div key={listKey} className={navDirection === 'forward' ? 'slide-enter-forward' : 'slide-enter-backward'} style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* --- LISTA ELEMENTÓW Z ZEROWYMI MARGINESAMI --- (Tylko to ma się scrollować) */}
+      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: '12px' }}> 
+        <div key={listKey} className={navDirection === 'forward' ? 'slide-enter-forward' : 'slide-enter-backward'} style={{ display: 'flex', flexDirection: 'column' }}>
         {currentNodes.length === 0 && <div style={{ color: '#555', fontSize: '0.75rem', fontStyle: 'italic', padding: '10px 6px' }}>Folder pusty.</div>}
         {currentNodes.map((node, idx) => (
           <NodeItem 
@@ -380,6 +384,7 @@ export const Sidebar = ({
             onDrillDown={handleDrillDown} isRoot={isRootLevel} 
           />
         ))}
+      </div>
       </div>
 
       {/* --- MENU KONTEKSTOWE --- */}

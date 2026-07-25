@@ -274,7 +274,7 @@ const RobotPlayer3D = ({ trajectory, refTrajectory, showGhost, setShowGhost, dis
         {isTrajectoryLoading ? (
           <div style={{ padding: '1rem', color: '#2196f3', textAlign: 'center', marginTop: isDocked ? '20%' : '150px' }}>⏳ Obliczanie macierzy kinematyki dla 3D...</div>
         ) : (
-          <Canvas camera={{ position: [2, 1.5, 2], fov: 45 }} shadows>
+          <Canvas camera={{ position: [2, 1.5, 2], fov: 45 }} shadows={{ type: THREE.PCFShadowMap }}>
             <color attach="background" args={['#0f0f0f']} />
             <ambientLight intensity={0.6} />
             <directionalLight position={[5, 10, 5]} intensity={1.5} castShadow shadow-mapSize-width={1024} shadow-mapSize-height={1024} />
@@ -344,6 +344,8 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const [batchResults, setBatchResults] = useState<any[] | null>(null);
   const [isBatchLoading, setIsBatchLoading] = useState(false);
   const [batchTrendSelection, setBatchTrendSelection] = useState<string>('Ogólny');
+  const [showBatchTemp, setShowBatchTemp] = useState<boolean>(false);
+  const [batchTempSelection, setBatchTempSelection] = useState<string>('Średnia');
   
   const robotName = selectedFilePath ? selectedFilePath.split(/[/\\]/)[1] : '';
   const isFile = selectedFilePath ? selectedFilePath.endsWith('.csv') : false;
@@ -523,7 +525,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const unit = getUnit(selectedColumn);
 
   return (
-    <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', minHeight: '100%', width: '100%', minWidth: 0 }}>
       {/* --- NAGŁÓWEK --- */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
         <div>
@@ -559,13 +561,31 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div style={{ background: '#141414', padding: '10px 15px', borderRadius: '8px', border: '1px solid #2a2a2a', borderLeft: '4px solid #4caf50' }}>
-                  <h4 style={{ margin: '0 0 5px 0', color: '#4caf50', fontSize: '0.8rem' }}>🟢 Referencja</h4>
-                  <p style={{ margin: 0, color: '#888', fontSize: '0.75rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{robotInfo?.ref_file_info?.name || 'Brak pliku'}</p>
+                <div style={{ background: '#141414', padding: '10px 15px', borderRadius: '8px', border: '1px solid #2a2a2a', borderLeft: '4px solid #4caf50', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    <h4 style={{ margin: '0 0 5px 0', color: '#4caf50', fontSize: '0.8rem' }}>🟢 Referencja</h4>
+                    <p style={{ margin: '0 0 8px 0', color: '#888', fontSize: '0.75rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{robotInfo?.ref_file_info?.name || 'Brak pliku'}</p>
+                  </div>
+                  {diagnosis?.refTemps && Object.keys(diagnosis.refTemps).length > 0 && (
+                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                      {Object.entries(diagnosis.refTemps).map(([axis, temp]) => (
+                        <span key={axis} style={{ background: '#1a1a1a', border: '1px solid #333', color: '#aaa', fontSize: '0.65rem', padding: '2px 5px', borderRadius: '3px' }}>{axis}: <strong style={{color: '#4caf50'}}>{String(temp)}°C</strong></span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <div style={{ background: '#141414', padding: '10px 15px', borderRadius: '8px', border: '1px solid #2a2a2a', borderLeft: '4px solid #ffeb3b' }}>
-                  <h4 style={{ margin: '0 0 5px 0', color: '#ffeb3b', fontSize: '0.8rem' }}>🟡 Przebieg Badany</h4>
-                  <p style={{ margin: 0, color: '#888', fontSize: '0.75rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedFilePath?.split(/[/\\]/).pop()}</p>
+                <div style={{ background: '#141414', padding: '10px 15px', borderRadius: '8px', border: '1px solid #2a2a2a', borderLeft: '4px solid #ffeb3b', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                  <div>
+                    <h4 style={{ margin: '0 0 5px 0', color: '#ffeb3b', fontSize: '0.8rem' }}>🟡 Przebieg Badany</h4>
+                    <p style={{ margin: '0 0 8px 0', color: '#888', fontSize: '0.75rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedFilePath?.split(/[/\\]/).pop()}</p>
+                  </div>
+                  {diagnosis?.testTemps && Object.keys(diagnosis.testTemps).length > 0 && (
+                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                      {Object.entries(diagnosis.testTemps).map(([axis, temp]) => (
+                        <span key={axis} style={{ background: '#1a1a1a', border: '1px solid #333', color: '#aaa', fontSize: '0.65rem', padding: '2px 5px', borderRadius: '3px' }}>{axis}: <strong style={{color: '#ffeb3b'}}>{String(temp)}°C</strong></span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -732,7 +752,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
 
           {/* WIDOK: BATCH */}
           {viewMode === 'batch' ? (
-            <div style={{ background: '#141414', padding: '1.5rem', borderRadius: '8px', border: '1px solid #2a2a2a', width: '100%', boxSizing: 'border-box' }}>
+            <div style={{ background: '#141414', padding: '1.5rem', borderRadius: '8px', border: '1px solid #2a2a2a', width: 'calc(100vw - 350px)', maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                 <div>
                   <h3 style={{ color: '#2196f3', margin: 0 }}>Zestawienie Zbiorcze Przejazdów</h3>
@@ -751,8 +771,8 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
               </div>
 
               {batchResults ? (
-                <div style={{ width: '100%', overflowX: 'auto', borderRadius: '6px', border: '1px solid #333' }}>
-                  <table style={{ borderCollapse: 'collapse', color: '#fff', fontSize: '0.75rem', whiteSpace: 'nowrap', width: '100%' }}>
+                <div style={{ display: 'block', width: '100%', overflowX: 'auto', borderRadius: '6px', border: '1px solid #333' }}>
+                  <table style={{ borderCollapse: 'collapse', color: '#fff', fontSize: '0.75rem', whiteSpace: 'nowrap', minWidth: '100%' }}>
                     <thead>
                       <tr>
                         <th style={{ padding: '10px', borderBottom: '1px solid #333', borderRight: '1px solid #333', background: '#1a1a1a', textAlign: 'left', minWidth: '160px', position: 'sticky', left: 0, zIndex: 2 }}>
@@ -819,15 +839,34 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                 <div style={{ marginTop: '20px', background: '#111', padding: '15px', borderRadius: '6px', border: '1px solid #333' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                     <h4 style={{ color: '#2196f3', margin: 0, fontSize: '0.95rem' }}>📈 Trend degradacji</h4>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{ color: '#888', fontSize: '0.8rem' }}>Sygnał:</span>
-                      <select 
-                        value={batchTrendSelection} onChange={e => setBatchTrendSelection(e.target.value)}
-                        style={{ background: '#1a1a1a', color: '#fff', border: '1px solid #444', padding: '4px 8px', borderRadius: '4px', outline: 'none', fontSize: '0.85rem' }}
-                      >
-                        <option value="Ogólny">∑ Trend Ogólny</option>
-                        {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
-                      </select>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                      <label style={{ color: '#ff9800', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={showBatchTemp} onChange={e => setShowBatchTemp(e.target.checked)} style={{ accentColor: '#ff9800' }} />
+                        Pokaż temperaturę
+                      </label>
+                      {showBatchTemp && (
+                        <select
+                          value={batchTempSelection} onChange={e => setBatchTempSelection(e.target.value)}
+                          style={{ background: '#1a1a1a', color: '#ff9800', border: '1px solid #444', padding: '4px 8px', borderRadius: '4px', outline: 'none', fontSize: '0.85rem' }}
+                        >
+                          <option value="Średnia">∑ Średnia Temp.</option>
+                          <option value="A1">A1</option><option value="A2">A2</option><option value="A3">A3</option>
+                          <option value="A4">A4</option><option value="A5">A5</option><option value="A6">A6</option>
+                        </select>
+                      )}
+                      
+                      <div style={{ width: '1px', height: '20px', background: '#333' }}></div>
+                      
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ color: '#888', fontSize: '0.8rem' }}>Sygnał:</span>
+                        <select 
+                          value={batchTrendSelection} onChange={e => setBatchTrendSelection(e.target.value)}
+                          style={{ background: '#1a1a1a', color: '#fff', border: '1px solid #444', padding: '4px 8px', borderRadius: '4px', outline: 'none', fontSize: '0.85rem' }}
+                        >
+                          <option value="Ogólny">∑ Trend Ogólny</option>
+                          {availableColumns.map(col => <option key={col} value={col}>{col}</option>)}
+                        </select>
+                      </div>
                     </div>
                   </div>
 
@@ -835,26 +874,46 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart
                         data={batchResults.map((res: any) => {
-                          let wartosc = 0;
-                          if (batchTrendSelection === 'Ogólny') {
-                            const violationValues = Object.values(res.violation_percents || {}) as number[];
-                            const nonZeroValues = violationValues.filter(v => typeof v === 'number' && v > 0);
-                            wartosc = nonZeroValues.length > 0 ? nonZeroValues.reduce((sum, val) => sum + val, 0) / nonZeroValues.length : 0;
-                          } else { wartosc = res.violation_percents[batchTrendSelection] || 0; }
-                          return { name: res.file_name.replace('przejazd_', 'P').replace('.csv', ''), wartosc: parseFloat(wartosc.toFixed(2)) };
-                        })}
-                        margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
-                      >
-                        <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
-                        <XAxis dataKey="name" stroke="#666" angle={-45} textAnchor="end" height={60} fontSize={10} />
-                        <YAxis stroke="#666" fontSize={10} unit="%" />
-                        <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', fontSize: '0.85rem', borderRadius: '6px' }} />
-                        <ReferenceLine y={overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0} stroke="#f44336" strokeDasharray="3 3" />
-                        <Line type="monotone" name={batchTrendSelection === 'Ogólny' ? 'Średnia awarii' : batchTrendSelection} dataKey="wartosc" stroke="#2196f3" strokeWidth={2} dot={{ r: 3, fill: '#2196f3' }} activeDot={{ r: 6 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
+                            let wartosc = 0;
+                            if (batchTrendSelection === 'Ogólny') {
+                              const violationValues = Object.values(res.violation_percents || {}) as number[];
+                              const nonZeroValues = violationValues.filter(v => typeof v === 'number' && v > 0);
+                              wartosc = nonZeroValues.length > 0 ? nonZeroValues.reduce((sum, val) => sum + val, 0) / nonZeroValues.length : 0;
+                            } else { wartosc = res.violation_percents[batchTrendSelection] || 0; }
+                            
+                            let tempVal = 0;
+                            if (res.test_temps && Object.keys(res.test_temps).length > 0) {
+                                if (batchTempSelection === 'Średnia') {
+                                    const vals = Object.values(res.test_temps) as number[];
+                                    if (vals.length > 0) tempVal = vals.reduce((sum, val) => sum + val, 0) / vals.length;
+                                } else {
+                                    tempVal = res.test_temps[batchTempSelection] || 0;
+                                }
+                            }
+
+                            return { 
+                              name: res.file_name.replace('przejazd_', 'P').replace('.csv', ''), 
+                              wartosc: parseFloat(wartosc.toFixed(2)),
+                              temperatura: parseFloat(tempVal.toFixed(1))
+                            };
+                          })}
+                          margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
+                        >
+                          <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
+                          <XAxis dataKey="name" stroke="#666" angle={-45} textAnchor="end" height={60} fontSize={10} />
+                          <YAxis yAxisId="left" stroke="#666" fontSize={10} unit="%" />
+                          {showBatchTemp && <YAxis yAxisId="right" orientation="right" stroke="#ff9800" fontSize={10} unit="°C" domain={['auto', 'auto']} />}
+                          
+                          <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', fontSize: '0.85rem', borderRadius: '6px' }} />
+                          <ReferenceLine yAxisId="left" y={overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0} stroke="#f44336" strokeDasharray="3 3" />
+                          
+                          <Line yAxisId="left" type="monotone" name={batchTrendSelection === 'Ogólny' ? 'Średnia awarii' : batchTrendSelection} dataKey="wartosc" stroke="#2196f3" strokeWidth={2} dot={{ r: 3, fill: '#2196f3' }} activeDot={{ r: 6 }} />
+                          {showBatchTemp && <Line yAxisId="right" type="monotone" name={`Temp. ${batchTempSelection}`} dataKey="temperatura" stroke="#ff9800" strokeWidth={2} dot={{ r: 3, fill: '#ff9800' }} activeDot={{ r: 6 }} />}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
-                </div>
+                
               )}
             </div>
             

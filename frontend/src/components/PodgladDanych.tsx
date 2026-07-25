@@ -203,7 +203,7 @@ const RobotPlayer3D = ({ trajectory, displayedData, playbackIndex, setPlaybackIn
         {isTrajectoryLoading ? (
           <div style={{ padding: '1rem', color: '#2196f3', textAlign: 'center', marginTop: isDocked ? '20%' : '150px' }}>⏳ Obliczanie macierzy kinematyki dla 3D...</div>
         ) : (
-          <Canvas camera={{ position: [2, 1.5, 2], fov: 45 }} shadows>
+          <Canvas camera={{ position: [2, 1.5, 2], fov: 45 }} shadows={{ type: THREE.PCFShadowMap }}>
             <color attach="background" args={['#0f0f0f']} />
             <ambientLight intensity={0.6} />
             <directionalLight position={[5, 10, 5]} intensity={1.5} castShadow shadow-mapSize-width={1024} shadow-mapSize-height={1024} />
@@ -340,12 +340,26 @@ export const PodgladDanych = ({ selectedFilePath }: { selectedFilePath: string |
             </div>
           ) : fileInfo && fileInfo.is_valid ? (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '20px' }}>
                 <MetricCard title="Format pliku" value="Poprawny CSV" valueColor="#4caf50" />
                 <MetricCard title="Liczba próbek" value={fileInfo.rows_count.toLocaleString('pl-PL')} />
                 <MetricCard title="Data modyfikacji" value={fileInfo.record_date} />
                 <MetricCard title="Czas nagrania" value={fileInfo.duration !== null ? `${fileInfo.duration.toFixed(2)} s` : 'Brak danych'} valueColor="#00bcd4" />
               </div>
+
+              {/* NOWY BLOK: WYŚWIETLANIE TEMPERATUR */}
+              {fileInfo.temperatures && Object.keys(fileInfo.temperatures).length > 0 && (
+                <div style={{ background: '#111', borderRadius: '8px', border: '1px solid #2a2a2a', padding: '12px 16px', marginBottom: '20px' }}>
+                  <h4 style={{ margin: '0 0 10px 0', color: '#ff9800', fontSize: '0.85rem' }}>🌡️ Temperatury silników (z preambuły)</h4>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {Object.entries(fileInfo.temperatures).map(([axis, temp]) => (
+                      <span key={axis} style={{ background: '#1a1a1a', border: '1px solid #333', color: '#ddd', fontSize: '0.75rem', padding: '4px 10px', borderRadius: '4px' }}>
+                        {axis}: <strong style={{color: '#ff9800'}}>{String(temp)}°C</strong>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div style={{ background: '#141414', borderRadius: '8px', border: '1px solid #2a2a2a', padding: '16px', marginBottom: '20px' }}>
                 <span style={{ color: '#888', fontSize: '0.8rem', display: 'block', marginBottom: '12px', fontWeight: 'bold' }}>AKTYWNE SYGNAŁY (WARSTWY WYKRESU):</span>
