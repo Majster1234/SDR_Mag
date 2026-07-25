@@ -11,20 +11,32 @@ type Metric = 'MAE' | 'MSE' | 'IAE' | 'ISE';
 const METRICS: Metric[] = ['MAE', 'MSE', 'IAE', 'ISE'];
 
 // --- MINI WYKRES DO WIDOKU WSPÓLNEGO ---
-const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker, violationAreas, violationPercent }: any) => {
+const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker, violationAreas, violationPercent, isExpanded, onToggleExpand, showRawDiff }: any) => {
   const getBadgeColor = () => {
       if (violationPercent === 0) return '#4caf50';
       if (violationPercent >= failureThreshold) return '#f44336';
       return '#ff9800';
   };
   return (
-    <div style={{ background: '#141414', padding: '12px', borderRadius: '8px', border: '1px solid #2a2a2a', marginBottom: '12px' }}>
+    <div style={{ background: '#141414', padding: '12px', borderRadius: '8px', border: '1px solid #2a2a2a', marginBottom: '12px', transition: 'all 0.3s ease' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <h5 style={{ margin: 0, color: '#aaa', fontSize: '0.85rem' }}>{title} <span style={{ opacity: 0.5 }}>[{unit}]</span></h5>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <h5 style={{ margin: 0, color: '#aaa', fontSize: '0.85rem' }}>{title} <span style={{ opacity: 0.5 }}>[{unit}]</span></h5>
+          <button 
+            onClick={onToggleExpand} 
+            style={{ background: 'transparent', border: '1px solid #333', color: '#888', borderRadius: '4px', padding: '2px 6px', fontSize: '0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', transition: '0.2s' }}
+            onMouseEnter={e => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#555'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = '#888'; e.currentTarget.style.borderColor = '#333'; }}
+          >
+            {isExpanded ? '▲ Ukryj residua' : '▼ Widok różnicy'}
+          </button>
+        </div>
         <span style={{ background: getBadgeColor(), color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' }}>
           {violationPercent > 0 ? `${violationPercent.toFixed(1)}% błędów` : '✅ OK'}
         </span>
       </div>
+      
+      {/* GŁÓWNY WYKRES */}
       <div style={{ height: '120px', position: 'relative' }}>
         {showTimeMarker && (
           <div className="mini-sync-line" style={{ position: 'absolute', top: 5, bottom: 5, width: '2px', backgroundColor: '#2196f3', left: '5px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 5px rgba(33, 150, 243, 0.5)' }} />
@@ -36,12 +48,51 @@ const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker,
             <YAxis domain={['auto', 'auto']} hide />
             <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} formatter={(v: any) => [Number(v).toFixed(2), '']} />
             {violationAreas && violationAreas.map((area: any, idx: number) => <ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />)}
-            <Line dataKey="UpperLimit" stroke="#555" strokeDasharray="3 3" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
-            <Line dataKey="LowerLimit" stroke="#555" strokeDasharray="3 3" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
             <Line dataKey="Referencja" stroke="#4caf50" strokeWidth={1.5} dot={false} isAnimationActive={false} />
             <Line dataKey="Badany" stroke="#ffeb3b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
           </ComposedChart>
         </ResponsiveContainer>
+      </div>
+
+{/* ROZWIJANY WYKRES RÓŻNIC (RESIDUA) - Z ANIMACJĄ CSS */}
+      <div style={{ 
+        maxHeight: isExpanded ? '150px' : '0px', 
+        opacity: isExpanded ? 1 : 0, 
+        overflow: 'hidden', 
+        transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+        marginTop: isExpanded ? '10px' : '0px', 
+        borderTop: `1px dashed ${isExpanded ? '#333' : 'transparent'}`, 
+        paddingTop: isExpanded ? '10px' : '0px' 
+      }}>
+        <div style={{ height: '100px', position: 'relative' }}>
+          {showTimeMarker && (
+            <div className="mini-sync-line" style={{ position: 'absolute', top: 0, bottom: 5, width: '2px', backgroundColor: '#2196f3', left: '5px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 5px rgba(33, 150, 243, 0.5)' }} />
+          )}
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
+              <XAxis dataKey="Time" hide />
+              <YAxis domain={['auto', 'auto']} hide />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} 
+                formatter={(v: any, name: any) => {
+                  const strName = String(name);
+                  if (strName === "DiffUpper" || strName === "DiffLower") return [Number(v).toFixed(2), 'Limit tolerancji'];
+                  if (strName === "RoznicaRaw") return [Number(v).toFixed(2), 'Δ Surowa (bez komp.)']; // NOWE
+                  if (strName === "Roznica") return [Number(v).toFixed(2), 'Δ Różnica (po komp.)']; // ZMIENIONE
+                  return [Number(v).toFixed(2), ''];
+                }}
+              />
+              {violationAreas && violationAreas.map((area: any, idx: number) => <ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />)}
+              <Line type="stepAfter" dataKey="DiffUpper" stroke="#555" strokeDasharray="3 3" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
+              <Line type="stepAfter" dataKey="DiffLower" stroke="#555" strokeDasharray="3 3" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
+              {showRawDiff && (
+                <Line type="monotone" dataKey="RoznicaRaw" stroke="#888" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
+              )}
+              <Line type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );
@@ -136,7 +187,7 @@ const RobotPlayer3D = ({ trajectory, refTrajectory, showGhost, setShowGhost, dis
   const speedRef = useRef(playbackSpeed);
   const [dockWidth, setDockWidth] = useState(450); 
   const [dockHeight, setDockHeight] = useState(280);
-
+  const [showRawDiff, setShowRawDiff] = useState<boolean>(false);
   useEffect(() => { setLocalIndex(playbackIndex); }, [playbackIndex]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(() => { speedRef.current = playbackSpeed; }, [playbackSpeed]);
@@ -345,8 +396,10 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const [isBatchLoading, setIsBatchLoading] = useState(false);
   const [batchTrendSelection, setBatchTrendSelection] = useState<string>('Ogólny');
   const [showBatchTemp, setShowBatchTemp] = useState<boolean>(false);
+  const [showRawDiff, setShowRawDiff] = useState<boolean>(false); 
+  const [showBatchRaw, setShowBatchRaw] = useState<boolean>(false);
   const [batchTempSelection, setBatchTempSelection] = useState<string>('Średnia');
-  
+  const [expandedResiduals, setExpandedResiduals] = useState<string[]>([]);
   const robotName = selectedFilePath ? selectedFilePath.split(/[/\\]/)[1] : '';
   const isFile = selectedFilePath ? selectedFilePath.endsWith('.csv') : false;
 
@@ -844,6 +897,10 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                         <input type="checkbox" checked={showBatchTemp} onChange={e => setShowBatchTemp(e.target.checked)} style={{ accentColor: '#ff9800' }} />
                         Pokaż temperaturę
                       </label>
+                      <label style={{ color: '#9c27b0', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked={showBatchRaw} onChange={e => setShowBatchRaw(e.target.checked)} style={{ accentColor: '#9c27b0' }} />
+                        Surowe awarie (bez komp.)
+                      </label>
                       {showBatchTemp && (
                         <select
                           value={batchTempSelection} onChange={e => setBatchTempSelection(e.target.value)}
@@ -875,11 +932,21 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                       <LineChart
                         data={batchResults.map((res: any) => {
                             let wartosc = 0;
+                            let wartoscRaw = 0; // NOWA ZMIENNA
+                            
                             if (batchTrendSelection === 'Ogólny') {
                               const violationValues = Object.values(res.violation_percents || {}) as number[];
                               const nonZeroValues = violationValues.filter(v => typeof v === 'number' && v > 0);
                               wartosc = nonZeroValues.length > 0 ? nonZeroValues.reduce((sum, val) => sum + val, 0) / nonZeroValues.length : 0;
-                            } else { wartosc = res.violation_percents[batchTrendSelection] || 0; }
+                              
+                              // WYLICZENIE ŚREDNIEJ SUROWEJ
+                              const violationValuesRaw = Object.values(res.violation_percents_raw || {}) as number[];
+                              const nonZeroValuesRaw = violationValuesRaw.filter(v => typeof v === 'number' && v > 0);
+                              wartoscRaw = nonZeroValuesRaw.length > 0 ? nonZeroValuesRaw.reduce((sum, val) => sum + val, 0) / nonZeroValuesRaw.length : 0;
+                            } else { 
+                              wartosc = res.violation_percents[batchTrendSelection] || 0; 
+                              wartoscRaw = res.violation_percents_raw?.[batchTrendSelection] || 0;
+                            }
                             
                             let tempVal = 0;
                             if (res.test_temps && Object.keys(res.test_temps).length > 0) {
@@ -894,6 +961,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                             return { 
                               name: res.file_name.replace('przejazd_', 'P').replace('.csv', ''), 
                               wartosc: parseFloat(wartosc.toFixed(2)),
+                              wartoscRaw: parseFloat(wartoscRaw.toFixed(2)), // WSTRZYKNIĘCIE DANYCH
                               temperatura: parseFloat(tempVal.toFixed(1))
                             };
                           })}
@@ -908,6 +976,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           <ReferenceLine yAxisId="left" y={overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0} stroke="#f44336" strokeDasharray="3 3" />
                           
                           <Line yAxisId="left" type="monotone" name={batchTrendSelection === 'Ogólny' ? 'Średnia awarii' : batchTrendSelection} dataKey="wartosc" stroke="#2196f3" strokeWidth={2} dot={{ r: 3, fill: '#2196f3' }} activeDot={{ r: 6 }} />
+                          {showBatchRaw && <Line yAxisId="left" type="monotone" name="Surowe awarie (bez komp.)" dataKey="wartoscRaw" stroke="#9c27b0" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3, fill: '#9c27b0' }} activeDot={{ r: 6 }} />}
                           {showBatchTemp && <Line yAxisId="right" type="monotone" name={`Temp. ${batchTempSelection}`} dataKey="temperatura" stroke="#ff9800" strokeWidth={2} dot={{ r: 3, fill: '#ff9800' }} activeDot={{ r: 6 }} />}
                         </LineChart>
                       </ResponsiveContainer>
@@ -960,8 +1029,6 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                     <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={{ fontSize: '0.85rem', color: '#888' }} />
                     
                     {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.2} strokeOpacity={0} />))}
-                    <Line name="Górny limit" type="monotone" dataKey="UpperLimit" stroke="#555" strokeDasharray="4 4" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
-                    <Line name="Dolny limit" type="monotone" dataKey="LowerLimit" stroke="#555" strokeDasharray="4 4" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
                     <Line name="Referencja" type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={1.5} dot={false} isAnimationActive={false} />
                     <Line name="Badany" type="monotone" dataKey="Badany" stroke="#ffeb3b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
                     
@@ -1021,20 +1088,65 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
             </>
           ) : (
             
-          /* WIDOK: WSPÓLNY (Siatka Mini-wykresów) */
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginTop: '1rem' }}>
-            <div>
-              <h4 style={{ color: '#00bcd4', textAlign: 'center', borderBottom: '1px solid #2a2a2a', paddingBottom: '8px', marginTop: 0 }}>Osie Kątowe (A)</h4>
-              {statsData?.aCols?.map((col: string) => (
-                <MiniAnalizaChart key={col} title={col} unit="°" data={diagnosis?.chartData?.[col] || []} failureThreshold={robotInfo?.config?.max_violation_threshold || 5.0} showTimeMarker={showTimeMarker} violationAreas={diagnosis?.violationAreas?.[col]} violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0} />
-              ))}
-            </div>
-            <div>
-              <h4 style={{ color: '#ffeb3b', textAlign: 'center', borderBottom: '1px solid #2a2a2a', paddingBottom: '8px', marginTop: 0 }}>Prądy Silników (Cur)</h4>
-              {statsData?.curCols?.map((col: string) => (
-                <MiniAnalizaChart key={col} title={col} unit="%" data={diagnosis?.chartData?.[col] || []} failureThreshold={robotInfo?.config?.max_violation_threshold || 5.0} showTimeMarker={showTimeMarker} violationAreas={diagnosis?.violationAreas?.[col]} violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0} />
-              ))}
-            </div>
+        /* WIDOK: WSPÓLNY (Siatka Mini-wykresów) */
+          <div style={{ display: 'flex', flexDirection: 'column', marginTop: '1rem' }}>
+            {(() => {
+              const allCols = [...(statsData?.aCols || []), ...(statsData?.curCols || [])];
+              const isAllExpanded = expandedResiduals.length > 0 && expandedResiduals.length === allCols.length;
+              
+              const toggleAll = () => setExpandedResiduals(isAllExpanded ? [] : allCols);
+              const toggleSingle = (col: string) => setExpandedResiduals(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]);
+
+              return (
+                <>
+                
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
+                    <button 
+                      onClick={() => setShowRawDiff(!showRawDiff)} 
+                      style={{ background: showRawDiff ? 'rgba(156, 39, 176, 0.2)' : 'transparent', color: showRawDiff ? '#e1bee7' : '#888', border: `1px solid ${showRawDiff ? '#9c27b0' : '#444'}`, borderRadius: '4px', padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', transition: '0.2s' }}
+                    >
+                      👁️ {showRawDiff ? 'Ukryj surowe odchylenie' : 'Pokaż surowe odchylenie'}
+                    </button>
+                    <button 
+                      onClick={toggleAll} 
+                      style={{ background: 'rgba(33, 150, 243, 0.1)', color: '#2196f3', border: '1px solid rgba(33, 150, 243, 0.3)', borderRadius: '4px', padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', transition: '0.2s' }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(33, 150, 243, 0.2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'rgba(33, 150, 243, 0.1)'}
+                    >
+                      {isAllExpanded ? '▲ Zwiń wszystkie residua' : '▼ Rozwiń wszystkie residua'}
+                    </button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                    <div>
+                      <h4 style={{ color: '#00bcd4', textAlign: 'center', borderBottom: '1px solid #2a2a2a', paddingBottom: '8px', marginTop: 0 }}>Osie Kątowe (A)</h4>
+                      {statsData?.aCols?.map((col: string) => (
+                        <MiniAnalizaChart 
+                          key={col} title={col} unit="°" data={diagnosis?.chartData?.[col] || []} 
+                          failureThreshold={robotInfo?.config?.max_violation_threshold || 5.0} 
+                          showTimeMarker={showTimeMarker} violationAreas={diagnosis?.violationAreas?.[col]} 
+                          violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0}
+                          isExpanded={expandedResiduals.includes(col)}
+                          onToggleExpand={() => toggleSingle(col)}
+                        />
+                      ))}
+                    </div>
+                    <div>
+                      <h4 style={{ color: '#ffeb3b', textAlign: 'center', borderBottom: '1px solid #2a2a2a', paddingBottom: '8px', marginTop: 0 }}>Prądy Silników (Cur)</h4>
+                      {statsData?.curCols?.map((col: string) => (
+                        <MiniAnalizaChart 
+                          key={col} title={col} unit="%" data={diagnosis?.chartData?.[col] || []} 
+                          failureThreshold={robotInfo?.config?.max_violation_threshold || 5.0} 
+                          showTimeMarker={showTimeMarker} violationAreas={diagnosis?.violationAreas?.[col]} 
+                          violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0}
+                          isExpanded={expandedResiduals.includes(col)}
+                          onToggleExpand={() => toggleSingle(col)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
           </div>
           )}
         </div>

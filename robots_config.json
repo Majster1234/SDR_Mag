@@ -104,5 +104,107 @@
         "mse_threshold": 1,
         "iae_threshold": 50,
         "ise_threshold": 100
+    },
+    "24_07_2026_temperatura": {
+        "model": "Nieokreślony",
+        "location": "",
+        "diagnosis_type": "Odchylenia",
+        "ai_model_id": "",
+        "max_violation_threshold": 5,
+        "a_deviation_threshold": 2,
+        "cur_deviation_threshold": 2,
+        "a_deadband_threshold": 0.05,
+        "cur_deadband_threshold": 0.05,
+        "tuning_mode": "okno",
+        "a_offset_threshold": 0.1,
+        "cur_offset_threshold": 5,
+        "sigma_multiplier": 3,
+        "mae_threshold": 1,
+        "mse_threshold": 1,
+        "iae_threshold": 50,
+        "ise_threshold": 100,
+        "thermal_config": {
+            "A1": {
+                "a": 4.7087407423950935,
+                "b": -15.195416434695842,
+                "c": 0
+            },
+            "A2": {
+                "a": 2.3764643917817576,
+                "b": -7.251617689809848,
+                "c": 0
+            },
+            "A3": {
+                "a": 6.844388087182173,
+                "b": -22.541922076902704,
+                "c": 0
+            },
+            "A4": {
+                "a": 5.9185038911159635,
+                "b": -19.441150756436553,
+                "c": 0
+            },
+            "A5": {
+                "a": 8.542498362651482,
+                "b": -28.360960120868235,
+                "c": 0
+            },
+            "A6": {
+                "a": 5.712534253834852,
+                "b": -18.619226364174928,
+                "c": 0
+            }
+        }
+    },
+    "24_07_2026_ruch_ref_temp": {
+        "model": "Nieokreślony",
+        "location": "",
+        "diagnosis_type": "Odchylenia",
+        "ai_model_id": "",
+        "max_violation_threshold": 5,
+        "a_deviation_threshold": 2,
+        "cur_deviation_threshold": 2,
+        "a_deadband_threshold": 0.05,
+        "cur_deadband_threshold": 0.05,
+        "tuning_mode": "okno",
+        "a_offset_threshold": 0.1,
+        "cur_offset_threshold": 5,
+        "sigma_multiplier": 3,
+        "mae_threshold": 1,
+        "mse_threshold": 1,
+        "iae_threshold": 50,
+        "ise_threshold": 100,
+        "thermal_config": {
+            "A1": {
+                "a": 6.768012185122466,
+                "b": -22.46154198567026,
+                "c": 0
+            },
+            "A2": {
+                "a": -0.5248256474303015,
+                "b": 2.8242621394614975,
+                "c": 0
+            },
+            "A3": {
+                "a": 4.732137459970962,
+                "b": -15.34190103739639,
+                "c": 0
+            },
+            "A4": {
+                "a": 8.013383147777285,
+                "b": -26.803423316223956,
+                "c": 0
+            },
+            "A5": {
+                "a": 9.378019511177866,
+                "b": -31.328227712244836,
+                "c": 0
+            },
+            "A6": {
+                "a": 9.232865302356755,
+                "b": -30.798162458732026,
+                "c": 0
+            }
+        }
     }
 }

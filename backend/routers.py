@@ -9,6 +9,7 @@ from backend.file_system import get_directory_tree, create_robot_structure, dele
 from backend.websocket_manager import manager
 from backend.config import BASE_DIR, DEFAULT_ROBOTS, ROOT_PATH
 import math
+import glob
 import json
 from typing import Optional, Dict, Any 
 from backend.ml.ml_engine import ml_engine
@@ -50,6 +51,8 @@ class TestModelReq(BaseModel):
     test_file_path: str
     reference_file_path: str
 
+class CalibrationReq(BaseModel):
+    robot_path: str
 CONFIG_FILE = os.path.join(ROOT_PATH, "robots_config.json")
 
 
@@ -548,6 +551,7 @@ def run_diagnosis(req: DiagnoseReq):
         chart_data = {}
         violation_areas = {}
         violation_percents = {}
+        violation_percents_raw = {}
         statsData = {}
 
         errors = {"MAE": {}, "MSE": {}, "IAE": {}, "ISE": {}}
@@ -564,7 +568,34 @@ def run_diagnosis(req: DiagnoseReq):
             is_a = col.startswith('A')
             r_vals = df_ref[col].values
             t_vals = df_test[col].values
-            err = t_vals - r_vals
+            
+            # --- 🌡️ KOMPENSACJA TERMICZNA (Tylko dla prądów!) ---
+            if is_a:
+                # Pozycje kątowe NIE ZMIENIAJĄ SIĘ od lepkości, różnica pozostaje fizyczna i nienaruszona
+                err_raw = t_vals - r_vals
+                err = err_raw
+            else:
+                # Dla kolumn prądowych (Cur1..Cur6) odszukujemy konfigurację termiczną (zapisywaną w kreatorze pod kluczem A1..A6)
+                axis_key = col.replace("Cur", "A") 
+                
+                thermal_config = config.get("thermal_config", {})
+                axis_thermal = thermal_config.get(axis_key, {})
+                
+                a = axis_thermal.get("a", 0.0)
+                b = axis_thermal.get("b", 1.0)
+                
+                t_test = test_temps.get(axis_key, 50.0) if test_temps else 50.0
+                t_test = max(1.0, t_test) 
+                
+                if a == 0.0 and b == 1.0:
+                    k = 1.0 
+                else:
+                    k = a * np.log(t_test) + b
+                    
+                # Różnica surowa do podglądu vs różnica skompensowana do analizy awarii
+                err_raw = t_vals - r_vals
+                err = (t_vals * k) - r_vals
+            # --------------------------------------------------------
             
             errors["MAE"][col] = float(np.abs(err).mean())
             errors["MSE"][col] = float((err**2).mean())
@@ -616,12 +647,16 @@ def run_diagnosis(req: DiagnoseReq):
             low_limit = r_vals - margin
             
             if diag_type in ['Odchylenia', 'Odchylenie (offsetowe)', 'Statystyka']:
-                # NOWA LOGIKA: Sprawdzamy, czy bezwzględna wartość błędu przekracza margines
+                # NOWA LOGIKA: Sprawdzamy awarie z kompensacją i bez niej
                 is_out = np.abs(err) > margin
                 violation_percents[col] = float(is_out.mean() * 100)
+                
+                is_out_raw = np.abs(err_raw) > margin
+                violation_percents_raw[col] = float(is_out_raw.mean() * 100)
             else:
                 is_out = np.zeros(min_len, dtype=bool)
                 violation_percents[col] = 0.0
+                violation_percents_raw[col] = 0.0
                 
             out_indices = np.where(is_out)[0]
             areas = []
@@ -640,6 +675,7 @@ def run_diagnosis(req: DiagnoseReq):
                 "UpperLimit": np.round(up_limit, 4),
                 "LowerLimit": np.round(low_limit, 4),
                 "Roznica": np.round(err, 4),
+                "RoznicaRaw": np.round(err_raw, 4),
                 "DiffUpper": np.round(margin, 4),    # Dodatni margines na wykres różnic
                 "DiffLower": np.round(-margin, 4)
             })
@@ -710,6 +746,7 @@ def run_diagnosis(req: DiagnoseReq):
                 "curCols": cur_cols, 
                 "maxes": maxes, 
                 "violationPercents": violation_percents,
+                "violationPercentsRaw": violation_percents_raw,
                 "signalParams": statsData.get("signalParams", {}),
                 "calculatedStats": calculated_stats 
             },
@@ -798,12 +835,17 @@ def run_batch_diagnosis(req: BatchDiagnoseReq):
                                     if val is None and "raw" in col_data and isinstance(col_data["raw"], dict):
                                         val = col_data["raw"].get("violationPercent", col_data["raw"].get("violation_percent"))
                                     violation_percents[col] = float(val) if val is not None else 0.0
+                    violation_percents_raw = {}
+                    if isinstance(s_data, dict) and "violationPercentsRaw" in s_data:
+                        violation_percents_raw = s_data["violationPercentsRaw"]
+
                     test_temps = diag_res.get("testTemps", {})
                     results.append({
                         "file_name": file_name,
                         "manual_label": manual_label,
                         "auto_label": auto_label,
                         "violation_percents": violation_percents,
+                        "violation_percents_raw": violation_percents_raw, # <--- DODAJ TO TUTAJ
                         "test_temps": test_temps
                     })
                 else:
@@ -814,3 +856,123 @@ def run_batch_diagnosis(req: BatchDiagnoseReq):
     results = sorted(results, key=lambda x: x["file_name"])
     print(f"--- Zakończono. Przekazano {len(results)} plików do tabeli! ---\n")
     return {"batch_results": results}
+
+@router.post("/api/thermal-calibration")
+def run_thermal_calibration(req: CalibrationReq):
+    # NAPRAWA: Zawsze wymuszamy wejście do folderu "Roboty" przed nazwą docelowego robota
+    if ROOT_PATH:
+        robot_dir = os.path.join(ROOT_PATH, "Roboty", req.robot_path)
+    else:
+        robot_dir = os.path.join("Roboty", req.robot_path)
+        
+    ref_dir = os.path.join(robot_dir, "Przebieg_referencyjny")
+    
+    print(f"[KALIBRACJA] Szukam referencji w: {os.path.abspath(ref_dir)}")
+    
+    # 1. Zabezpieczenie przed brakiem folderu
+    if not os.path.exists(ref_dir):
+        return {"error": f"Katalog referencyjny nie istnieje: {os.path.abspath(ref_dir)}"}
+        
+    # 2. Kuloodporne szukanie pliku referencyjnego (omijamy glob)
+    all_files_in_ref = os.listdir(ref_dir)
+    ref_files = [os.path.join(ref_dir, f) for f in all_files_in_ref if f.lower().endswith('.csv')]
+    
+    if not ref_files:
+        return {"error": f"Folder znaleziony, ale brak w nim plików CSV! Zawartość: {all_files_in_ref}"}
+        
+    ref_file = ref_files[0]
+    
+    # Ładujemy pełne dane referencji
+    df_ref, temps_ref = load_robot_data(ref_file)
+    if not temps_ref:
+        return {"error": "Plik referencyjny nie posiada zapisanych temperatur w preambule!"}
+        
+    # 3. Niezawodne skanowanie archiwum przez os.walk
+    all_csvs = []
+    for root_dir, _, files in os.walk(robot_dir):
+        # Pomijamy folder referencyjny, żeby go drugi raz nie zliczać do statystyk
+        if "Przebieg_referencyjny" in root_dir:
+            continue
+        for f in files:
+            if f.lower().endswith('.csv'):
+                all_csvs.append(os.path.join(root_dir, f))
+                
+    file_temps = []
+    for f in all_csvs:
+        # Aby nie ładować całych plików do RAM-u i nie obciążać procesora, 
+        # ładujemy tylko temperatury (używamy tej samej funkcji, ale ona sama odczyta preambułę)
+        _, t = load_robot_data(f) 
+        if t:
+            file_temps.append({"file": f, "temps": t})
+            
+    if len(file_temps) < 2:
+        return {"error": "Potrzeba co najmniej 2 przebiegów archiwalnych z temperaturami, by wyznaczyć krzywą."}
+        
+    results = {}
+    
+    # 3. Złota pętla - wyliczanie krzywych dla każdej z 6 osi
+    for i in range(1, 7):
+        axis = f"A{i}"
+        cur_col = f"Cur{i}"
+        
+        t_ref = temps_ref.get(axis, 50.0)
+        
+        # Sortujemy archiwum po temperaturze dla tej konkretnej osi
+        sorted_files = sorted(file_temps, key=lambda x: x["temps"].get(axis, 50.0))
+        
+        # Najzimniejszy plik
+        file_min = sorted_files[0]
+        t_min = file_min["temps"].get(axis, 50.0)
+        
+        # Szukamy pliku "letniego", który jest najbliżej połowy drogi między zimnym a gorącym
+        t_target_mid = (t_min + t_ref) / 2.0
+        file_mid = min(sorted_files, key=lambda x: abs(x["temps"].get(axis, 50.0) - t_target_mid))
+        t_mid = file_mid["temps"].get(axis, 50.0)
+        
+        # Funkcja wewnętrzna obliczająca idealny skalar dla wskazanego pliku
+        def calc_scalar(test_file):
+            df_t, _ = load_robot_data(test_file)
+            df_t = df_t.fillna(0)
+            
+            # Wyrównanie długości wektorów
+            min_len = min(len(df_ref), len(df_t))
+            ref_vals = df_ref[cur_col].values[:min_len]
+            test_vals = df_t[cur_col].values[:min_len]
+            
+            # Metoda Najmniejszych Kwadratów: k = sum(test * ref) / sum(test^2)
+            denom = np.sum(test_vals**2)
+            if denom == 0: 
+                return 1.0
+            return np.sum(test_vals * ref_vals) / denom
+            
+        # 4. Obliczenie skalarów dla wybranych plików
+        k_min = float(calc_scalar(file_min["file"]))
+        k_mid = float(calc_scalar(file_mid["file"]))
+        k_ref = 1.0
+        
+        # 5. Dopasowanie paraboli (y = a*x^2 + b*x + c)
+        x = np.array([t_min, t_mid, t_ref])
+        y = np.array([k_min, k_mid, k_ref])
+        
+        # Zabezpieczenie przed błędem, gdyby wszystkie 3 pliki miały dokładnie tę samą temperaturę
+        if len(np.unique(x)) < 3:
+            a, b, c = 0.0, 0.0, 1.0
+        else:
+            if len(np.unique(x)) < 3:
+                a, b, c = 0.0, 1.0, 0.0  # fallback
+            else:
+                # Używamy np.log(x) aby zlinearyzować logarytm
+                coeffs = np.polyfit(np.log(x), y, 1)
+                a = float(coeffs[0])
+                b = float(coeffs[1])
+                c = 0.0
+            
+        # Ograniczamy wartości skalarów, żeby parabola nie generowała absurdów przy skrajnościach
+        results[axis] = {
+            "t_min": float(t_min), "k_min": round(k_min, 4),
+            "t_mid": float(t_mid), "k_mid": round(k_mid, 4),
+            "t_ref": float(t_ref), "k_ref": 1.0,
+            "coeffs": {"a": a, "b": b, "c": c}
+        }
+        
+    return {"status": "success", "calibration": results}

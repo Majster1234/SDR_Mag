@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { emitAppLog } from './Notifications';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot } from 'recharts';
 
 const KUKA_MODELS = [
   'Nieokreślony',
@@ -52,6 +53,14 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
 
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // --- STANY DLA KREATORA KOMPENSACJI ---
+  const [showCalibModal, setShowCalibModal] = useState(false);
+  const [isCalibrating, setIsCalibrating] = useState(false);
+  const [calibData, setCalibData] = useState<any>(null);
+
+  // --- STAN DLA KOMPENSACJI TERMICZNEJ ---
+  const [thermalConfig, setThermalConfig] = useState<any>({});
 
   // 1. Inicjalne pobieranie list (Roboty i modele AI)
   useEffect(() => {
@@ -121,6 +130,7 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
           setMseThresh(cfg.mse_threshold ?? 1.0);
           setIaeThresh(cfg.iae_threshold ?? 50.0);
           setIseThresh(cfg.ise_threshold ?? 100.0);
+          setThermalConfig(cfg.thermal_config || {});
         }
       } catch (e) {
         emitAppLog('error', `Błąd pobierania konfiguracji dla: ${selectedRobot}`);
@@ -155,6 +165,7 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
       mse_threshold: mseThresh,
       iae_threshold: iaeThresh,
       ise_threshold: iseThresh,
+      thermal_config: thermalConfig,
     };
 
     try {
@@ -183,6 +194,60 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
     }
     
     setIsSaving(false);
+  };
+
+  // --- LOGIKA KREATORA KOMPENSACJI ---
+  const runCalibration = async () => {
+    if (!selectedRobot) return;
+    setShowCalibModal(true);
+    setIsCalibrating(true);
+    setCalibData(null);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/thermal-calibration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ robot_path: selectedRobot })
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        setCalibData(data.calibration);
+      } else {
+        alert("Błąd kalibracji: " + data.error);
+        setShowCalibModal(false);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Błąd połączenia z backendem.");
+      setShowCalibModal(false);
+    } finally {
+      setIsCalibrating(false);
+    }
+  };
+
+  const generateCurveData = (axisData: any) => {
+    const data = [];
+    const { a, b, c } = axisData.coeffs;
+    const minT = Math.floor(axisData.t_min - 5);
+    const maxT = Math.ceil(axisData.t_ref + 5);
+    
+    for (let t = minT; t <= maxT; t += 1) {
+      const k = a * Math.log(t) + b;
+      data.push({ T: t, k: k });
+    }
+    return data;
+  };
+
+  const applyCalibration = () => {
+    const newThermal: any = { ...thermalConfig };
+    
+    // Nadpisujemy współczynniki dla każdej obliczonej osi
+    Object.keys(calibData).forEach(axis => {
+      newThermal[axis] = calibData[axis].coeffs;
+    });
+
+    setThermalConfig(newThermal);
+    setShowCalibModal(false);
+    emitAppLog('success', 'Współczynniki wyliczone! Pamiętaj aby zapisać konfigurację (Guzik "Zapisz konfigurację").');
   };
 
   // --- STYLE ERGONOMICZNE ---
@@ -214,13 +279,23 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
           </select>
         </div>
 
-        <button 
-          onClick={handleSave} 
-          disabled={isSaving || !selectedRobot || isLoading}
-          style={{ background: isSaving ? '#444' : '#2196f3', color: '#fff', border: 'none', padding: '8px 25px', borderRadius: '4px', fontWeight: 'bold', cursor: isSaving ? 'wait' : 'pointer', transition: 'background 0.2s' }}
-        >
-          {isSaving ? 'Zapisywanie...' : '💾 Zapisz konfigurację'}
-        </button>
+        <div style={{ display: 'flex', gap: '15px' }}>
+          <button 
+            onClick={runCalibration}
+            disabled={isSaving || !selectedRobot || isLoading}
+            style={{ background: '#ff9800', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: '4px', cursor: (!selectedRobot) ? 'not-allowed' : 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}
+          >
+            <span>🌡️</span> Kreator Kompensacji
+          </button>
+          
+          <button 
+            onClick={handleSave} 
+            disabled={isSaving || !selectedRobot || isLoading}
+            style={{ background: isSaving ? '#444' : '#2196f3', color: '#fff', border: 'none', padding: '8px 25px', borderRadius: '4px', fontWeight: 'bold', cursor: isSaving ? 'wait' : 'pointer', transition: 'background 0.2s' }}
+          >
+            {isSaving ? 'Zapisywanie...' : '💾 Zapisz konfigurację'}
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -349,9 +424,62 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
               <label style={labelStyle}>Domyślny Krok<input type="number" defaultValue={10} disabled style={{ ...inputStyle, opacity: 0.5 }} /></label>
             </div>
           </div>
+          {/* MODAL KATORA KOMPENSACJI */}
+          {showCalibModal && (
+            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              <div style={{ background: '#1e1e1e', padding: '30px', borderRadius: '12px', width: '90%', maxWidth: '1000px', maxHeight: '90vh', overflowY: 'auto', border: '1px solid #333', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333', paddingBottom: '15px', marginBottom: '20px' }}>
+                  <h2 style={{ margin: 0, color: '#ff9800', fontSize: '1.5rem' }}>🌡️ Kalibracja Termiczna (Metoda Najmniejszych Kwadratów)</h2>
+                  <button onClick={() => setShowCalibModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '1.8rem', cursor: 'pointer' }}>×</button>
+                </div>
 
+                {isCalibrating ? (
+                  <div style={{ textAlign: 'center', padding: '50px 0', color: '#aaa' }}>
+                    <h3 style={{ color: '#2196f3', marginBottom: '10px' }}>Skanowanie archiwum i optymalizacja współczynników...</h3>
+                    <p>Proszę czekać, algorytm przeszukuje preambuły i analizuje przebiegi.</p>
+                  </div>
+                ) : calibData ? (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+                      {Object.keys(calibData).map(axis => (
+                        <div key={axis} style={{ background: '#141414', padding: '15px', borderRadius: '8px', border: '1px solid #2a2a2a' }}>
+                          <h4 style={{ margin: '0 0 10px 0', color: '#00bcd4', textAlign: 'center' }}>Oś {axis}</h4>
+                          <div style={{ height: '180px' }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                              <LineChart data={generateCurveData(calibData[axis])} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                                <XAxis dataKey="T" stroke="#555" tick={{ fill: '#888', fontSize: 10 }} />
+                                <YAxis domain={['auto', 'auto']} stroke="#555" tick={{ fill: '#888', fontSize: 10 }} />
+                                <Tooltip contentStyle={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: '4px' }} formatter={(v: any) => Number(v).toFixed(4)} labelFormatter={(l) => `Temp: ${l}°C`} />
+                                
+                                <Line type="monotone" dataKey="k" stroke="#ffeb3b" strokeWidth={2} dot={false} isAnimationActive={false} name="Wsp. kompensacji (k)" />
+                                
+                                <ReferenceDot x={calibData[axis].t_min} y={calibData[axis].k_min} r={5} fill="#2196f3" stroke="none" />
+                                <ReferenceDot x={calibData[axis].t_mid} y={calibData[axis].k_mid} r={5} fill="#4caf50" stroke="none" />
+                                <ReferenceDot x={calibData[axis].t_ref} y={calibData[axis].k_ref} r={5} fill="#f44336" stroke="none" />
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#888', marginTop: '10px', textAlign: 'center' }}>
+                            <span style={{color: '#2196f3'}}>Zimny: {calibData[axis].t_min}°C (k={calibData[axis].k_min})</span> | 
+                            <span style={{color: '#f44336', marginLeft: '5px'}}>Ref: {calibData[axis].t_ref}°C (k={calibData[axis].k_ref})</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '15px', marginTop: '30px' }}>
+                      <button onClick={() => setShowCalibModal(false)} style={{ padding: '10px 20px', background: 'transparent', border: '1px solid #555', color: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Anuluj</button>
+                      <button onClick={applyCalibration} style={{ padding: '10px 20px', background: '#4caf50', border: 'none', color: '#fff', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold' }}>Zaakceptuj krzywe</button>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
+    
   );
+  
 };
