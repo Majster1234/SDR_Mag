@@ -571,6 +571,8 @@ def run_diagnosis(req: DiagnoseReq):
             
             # --- 🌡️ KOMPENSACJA TERMICZNA (Tylko dla prądów!) ---
             if is_a:
+                k=1
+                #t_vals_temp = t_vals*k
                 # Pozycje kątowe NIE ZMIENIAJĄ SIĘ od lepkości, różnica pozostaje fizyczna i nienaruszona
                 err_raw = t_vals - r_vals
                 err = err_raw
@@ -608,7 +610,7 @@ def run_diagnosis(req: DiagnoseReq):
                 exceeded_limits["IAE"][col] = bool(errors["IAE"][col] > safe_float(config.get("iae_threshold"), 50.0))
                 exceeded_limits["ISE"][col] = bool(errors["ISE"][col] > safe_float(config.get("ise_threshold"), 100.0))
             else:
-                for k in exceeded_limits: exceeded_limits[k][col] = False
+                for ko in exceeded_limits: exceeded_limits[ko][col] = False
 
             if diag_type == 'Odchylenia':
                 tuning_mode = config.get('tuning_mode', 'okno') 
@@ -672,6 +674,7 @@ def run_diagnosis(req: DiagnoseReq):
                 "Time": np.round(times, 3),
                 "Referencja": np.round(r_vals, 4),
                 "Badany": np.round(t_vals, 4),
+                "BadanyKomp": np.round(t_vals*k, 4),
                 "UpperLimit": np.round(up_limit, 4),
                 "LowerLimit": np.round(low_limit, 4),
                 "Roznica": np.round(err, 4),
@@ -680,6 +683,29 @@ def run_diagnosis(req: DiagnoseReq):
                 "DiffLower": np.round(-margin, 4)
             })
             chart_data[col] = temp_df.to_dict(orient='records')
+            # --- WYLICZANIE STATYSTYK SYGNAŁU (Do popupu we frontendzie) ---
+            if "signalParams" not in statsData:
+                statsData["signalParams"] = {}
+                
+            statsData["signalParams"][col] = {
+                "raw": {
+                    "min": float(np.min(t_vals)),
+                    "max": float(np.max(t_vals)),
+                    "peak_to_peak": float(np.ptp(t_vals)),
+                    "mean": float(np.mean(t_vals)),
+                    "rms": float(np.sqrt(np.mean(t_vals**2))),
+                    "std": float(np.std(t_vals))
+                },
+                "diff": {
+                    "min": float(np.min(err)),
+                    "max": float(np.max(err)),
+                    "peak_to_peak": float(np.ptp(err)),
+                    "mean": float(np.mean(err)),
+                    "rms": float(np.sqrt(np.mean(err**2))),
+                    "std": float(np.std(err))
+                }
+            }
+            # ---------------------------------------------------------------
         
         is_failure = False
         worst_axis = ""

@@ -108,16 +108,16 @@
     "24_07_2026_temperatura": {
         "model": "Nieokreślony",
         "location": "",
-        "diagnosis_type": "Odchylenia",
+        "diagnosis_type": "Odchylenie (offsetowe)",
         "ai_model_id": "",
-        "max_violation_threshold": 5,
+        "max_violation_threshold": 6,
         "a_deviation_threshold": 2,
         "cur_deviation_threshold": 2,
         "a_deadband_threshold": 0.05,
         "cur_deadband_threshold": 0.05,
         "tuning_mode": "okno",
         "a_offset_threshold": 0.1,
-        "cur_offset_threshold": 5,
+        "cur_offset_threshold": 7,
         "sigma_multiplier": 3,
         "mae_threshold": 1,
         "mse_threshold": 1,
@@ -125,33 +125,33 @@
         "ise_threshold": 100,
         "thermal_config": {
             "A1": {
-                "a": 4.7087407423950935,
-                "b": -15.195416434695842,
+                "a": 4.620832371038424,
+                "b": -14.892482382620388,
                 "c": 0
             },
             "A2": {
-                "a": 2.3764643917817576,
-                "b": -7.251617689809848,
+                "a": 2.4831077420182184,
+                "b": -7.6151508111327315,
                 "c": 0
             },
             "A3": {
-                "a": 6.844388087182173,
-                "b": -22.541922076902704,
+                "a": 6.788380861168399,
+                "b": -22.34889550187501,
                 "c": 0
             },
             "A4": {
-                "a": 5.9185038911159635,
-                "b": -19.441150756436553,
+                "a": 5.883020950287739,
+                "b": -19.318539318418736,
                 "c": 0
             },
             "A5": {
-                "a": 8.542498362651482,
-                "b": -28.360960120868235,
+                "a": 8.489555012504644,
+                "b": -28.178736997238662,
                 "c": 0
             },
             "A6": {
-                "a": 5.712534253834852,
-                "b": -18.619226364174928,
+                "a": 5.641506038981734,
+                "b": -18.375048933675455,
                 "c": 0
             }
         }
@@ -159,7 +159,7 @@
     "24_07_2026_ruch_ref_temp": {
         "model": "Nieokreślony",
         "location": "",
-        "diagnosis_type": "Odchylenia",
+        "diagnosis_type": "Odchylenie (offsetowe)",
         "ai_model_id": "",
         "max_violation_threshold": 5,
         "a_deviation_threshold": 2,
@@ -168,7 +168,7 @@
         "cur_deadband_threshold": 0.05,
         "tuning_mode": "okno",
         "a_offset_threshold": 0.1,
-        "cur_offset_threshold": 5,
+        "cur_offset_threshold": 6,
         "sigma_multiplier": 3,
         "mae_threshold": 1,
         "mse_threshold": 1,

@@ -1,5 +1,5 @@
 // AnalizaPrzebiegow.tsx
-import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
+import { useState, useEffect, useMemo, useRef, Fragment, memo } from 'react';
 import { LineChart, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea, ReferenceLine } from 'recharts';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
@@ -11,7 +11,7 @@ type Metric = 'MAE' | 'MSE' | 'IAE' | 'ISE';
 const METRICS: Metric[] = ['MAE', 'MSE', 'IAE', 'ISE'];
 
 // --- MINI WYKRES DO WIDOKU WSPÓLNEGO ---
-const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker, violationAreas, violationPercent, isExpanded, onToggleExpand, showRawDiff }: any) => {
+const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMarker, violationAreas, violationPercent, isExpanded, onToggleExpand, showRawDiff, onMaximize }: any) => {
   const getBadgeColor = () => {
       if (violationPercent === 0) return '#4caf50';
       if (violationPercent >= failureThreshold) return '#f44336';
@@ -22,6 +22,17 @@ const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker,
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <h5 style={{ margin: 0, color: '#aaa', fontSize: '0.85rem' }}>{title} <span style={{ opacity: 0.5 }}>[{unit}]</span></h5>
+          
+          <button 
+            onClick={onMaximize}
+            title="Powiększ na pełny ekran i analizuj"
+            style={{ background: 'transparent', border: 'none', color: '#2196f3', cursor: 'pointer', fontSize: '1rem', display: 'flex', alignItems: 'center', padding: '0 4px', transition: '0.2s', marginTop: '-2px' }}
+            onMouseEnter={e => e.currentTarget.style.color = '#fff'}
+            onMouseLeave={e => e.currentTarget.style.color = '#2196f3'}
+          >
+            ⛶
+          </button>
+
           <button 
             onClick={onToggleExpand} 
             style={{ background: 'transparent', border: '1px solid #333', color: '#888', borderRadius: '4px', padding: '2px 6px', fontSize: '0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', transition: '0.2s' }}
@@ -39,22 +50,23 @@ const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker,
       {/* GŁÓWNY WYKRES */}
       <div style={{ height: '120px', position: 'relative' }}>
         {showTimeMarker && (
-          <div className="mini-sync-line" style={{ position: 'absolute', top: 5, bottom: 5, width: '2px', backgroundColor: '#2196f3', left: '5px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 5px rgba(33, 150, 243, 0.5)' }} />
+          <div className="mini-sync-line" style={{ position: 'absolute', top: 5, bottom: 5, width: '2px', backgroundColor: '#2196f3', left: '40px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 5px rgba(33, 150, 243, 0.5)' }} />
         )}
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+          <ComposedChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
             <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
             <XAxis dataKey="Time" hide />
-            <YAxis domain={['auto', 'auto']} hide />
-            <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} formatter={(v: any) => [Number(v).toFixed(2), '']} />
+            <YAxis width={40} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 9}} tickFormatter={(v) => String(Math.round(v))} />
+            <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} formatter={(v: any, name: any) => [Number(v).toFixed(2), String(name)]} />
             {violationAreas && violationAreas.map((area: any, idx: number) => <ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />)}
-            <Line dataKey="Referencja" stroke="#4caf50" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-            <Line dataKey="Badany" stroke="#ffeb3b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+            <Line name="Referencja" type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+            <Line hide={!showRawDiff} name="Badany (Surowy)" type="monotone" dataKey="Badany" stroke="#ffeb3b" strokeWidth={1.5} strokeDasharray="2 2" dot={false} isAnimationActive={false} opacity={0.5} />
+            <Line name="Badany (Po komp.)" type="monotone" dataKey="BadanyKomp" stroke="#ffeb3b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
 
-{/* ROZWIJANY WYKRES RÓŻNIC (RESIDUA) - Z ANIMACJĄ CSS */}
+      {/* ROZWIJANY WYKRES RÓŻNIC (RESIDUA) */}
       <div style={{ 
         maxHeight: isExpanded ? '150px' : '0px', 
         opacity: isExpanded ? 1 : 0, 
@@ -64,39 +76,38 @@ const MiniAnalizaChart = ({ title, data, unit, failureThreshold, showTimeMarker,
         borderTop: `1px dashed ${isExpanded ? '#333' : 'transparent'}`, 
         paddingTop: isExpanded ? '10px' : '0px' 
       }}>
-        <div style={{ height: '100px', position: 'relative' }}>
+        <div style={{ height: '120px', position: 'relative' }}>
           {showTimeMarker && (
-            <div className="mini-sync-line" style={{ position: 'absolute', top: 0, bottom: 5, width: '2px', backgroundColor: '#2196f3', left: '5px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 5px rgba(33, 150, 243, 0.5)' }} />
+            <div className="mini-sync-line" style={{ position: 'absolute', top: 0, bottom: 5, width: '2px', backgroundColor: '#2196f3', left: '40px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 5px rgba(33, 150, 243, 0.5)' }} />
           )}
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+            <LineChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
               <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
               <XAxis dataKey="Time" hide />
-              <YAxis domain={['auto', 'auto']} hide />
-              <Tooltip 
-                contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} 
-                formatter={(v: any, name: any) => {
-                  const strName = String(name);
-                  if (strName === "DiffUpper" || strName === "DiffLower") return [Number(v).toFixed(2), 'Limit tolerancji'];
-                  if (strName === "RoznicaRaw") return [Number(v).toFixed(2), 'Δ Surowa (bez komp.)']; // NOWE
-                  if (strName === "Roznica") return [Number(v).toFixed(2), 'Δ Różnica (po komp.)']; // ZMIENIONE
-                  return [Number(v).toFixed(2), ''];
-                }}
-              />
+              <YAxis width={40} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 9}} tickFormatter={(v) => String(Math.round(v))} />
+              <Legend verticalAlign="top" height={24} iconSize={6} wrapperStyle={{ fontSize: '9px', color: '#888' }} />
+              <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} formatter={(v: any, name: any) => [Number(v).toFixed(2), String(name)]} />
               {violationAreas && violationAreas.map((area: any, idx: number) => <ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />)}
-              <Line type="stepAfter" dataKey="DiffUpper" stroke="#555" strokeDasharray="3 3" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
-              <Line type="stepAfter" dataKey="DiffLower" stroke="#555" strokeDasharray="3 3" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
-              {showRawDiff && (
-                <Line type="monotone" dataKey="RoznicaRaw" stroke="#888" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
-              )}
-              <Line type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+              
+              <Line name="Limit" type="stepAfter" dataKey="DiffUpper" stroke="#555" strokeDasharray="3 3" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
+              <Line name="Limit" type="stepAfter" dataKey="DiffLower" stroke="#555" strokeDasharray="3 3" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
+              <Line hide={!showRawDiff} name="Δ Surowa (bez komp.)" type="monotone" dataKey="RoznicaRaw" stroke="#888" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
+              <Line name="Δ Odchylenie" type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={1.5} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
     </div>
   );
-};
+}, (prevProps, nextProps) => {
+  // Magia React.memo - komponent przerysuje się TYLKO jeśli jego konkretne propsy się zmienią
+  return (
+    prevProps.isExpanded === nextProps.isExpanded &&
+    prevProps.showRawDiff === nextProps.showRawDiff &&
+    prevProps.data === nextProps.data
+  );
+});
+  
 
 // --- PROFESJONALNY MODEL WIZUALNY ROBOTA (Z obsługą Ducha Referencji) ---
 const ImprovedRobot = ({ points, isGhost = false }: { points: number[][], isGhost?: boolean }) => {
@@ -187,7 +198,9 @@ const RobotPlayer3D = ({ trajectory, refTrajectory, showGhost, setShowGhost, dis
   const speedRef = useRef(playbackSpeed);
   const [dockWidth, setDockWidth] = useState(450); 
   const [dockHeight, setDockHeight] = useState(280);
-  const [showRawDiff, setShowRawDiff] = useState<boolean>(false);
+
+
+  
   useEffect(() => { setLocalIndex(playbackIndex); }, [playbackIndex]);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
   useEffect(() => { speedRef.current = playbackSpeed; }, [playbackSpeed]);
@@ -377,7 +390,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const [availableColumns, setAvailableColumns] = useState<string[]>([]);
   const [selectedColumn, setSelectedColumn] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
-  const [viewMode, setViewMode] = useState<'detailed' | 'combined' | 'batch'>('detailed');
+  const [viewMode, setViewMode] = useState<'combined' | 'batch'>('combined');
   const [refAreaLeft, setRefAreaLeft] = useState<number | null>(null);
   const [refAreaRight, setRefAreaRight] = useState<number | null>(null);
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
@@ -400,8 +413,17 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const [showBatchRaw, setShowBatchRaw] = useState<boolean>(false);
   const [batchTempSelection, setBatchTempSelection] = useState<string>('Średnia');
   const [expandedResiduals, setExpandedResiduals] = useState<string[]>([]);
+  const [showStatsTable, setShowStatsTable] = useState<boolean>(true);
   const robotName = selectedFilePath ? selectedFilePath.split(/[/\\]/)[1] : '';
   const isFile = selectedFilePath ? selectedFilePath.endsWith('.csv') : false;
+  const [maximizedAxis, setMaximizedAxis] = useState<string | null>(null);
+  const [showModal3D, setShowModal3D] = useState<boolean>(false);
+  
+  const handleMaximize = (col: string) => {
+    setSelectedColumn(col); // Ustawiamy oś jako aktywną, żeby pobrać dla niej dane
+    setZoomRange(null);     // Resetujemy ewentualny stary zoom
+    setMaximizedAxis(col);  // Otwieramy modal
+  };
 
   const updateOverride = (key: string, value: any) => {
     setOverrideConfig((prev: any) => ({ ...(prev || diagnosis?.usedConfig || {}), [key]: value }));
@@ -558,15 +580,19 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const violationPercent = diagnosis?.statsData?.violationPercents?.[selectedColumn] || 0;
 
   const handleLiveScrub = (index: number) => {
-    if (!combinedData || combinedData.length < 2) return;
-    const percent = index / (combinedData.length - 1);
-    const mainCssCalc = `calc(90px + (100% - 120px) * ${percent})`;
-    if (mainChartLineRef.current) mainChartLineRef.current.style.left = mainCssCalc;
-    if (diffChartLineRef.current) diffChartLineRef.current.style.left = mainCssCalc;
+      if (!combinedData || combinedData.length < 2) return;
+      const percent = index / (combinedData.length - 1);
+      
+      const mainCssCalc = `calc(90px + (100% - 120px) * ${percent})`;
+      if (mainChartLineRef.current) mainChartLineRef.current.style.left = mainCssCalc;
+      if (diffChartLineRef.current) diffChartLineRef.current.style.left = mainCssCalc;
 
-    const miniCssCalc = `calc(5px + (100% - 10px) * ${percent})`;
-    document.querySelectorAll<HTMLElement>('.mini-sync-line').forEach(line => line.style.left = miniCssCalc);
-  };
+      const miniCssCalc = `calc(40px + (100% - 50px) * ${percent})`;
+      document.querySelectorAll<HTMLElement>('.mini-sync-line').forEach(line => line.style.left = miniCssCalc);
+      
+      // NOWE: Obsługa suwaka wewnątrz powiększonego Modala
+      document.querySelectorAll<HTMLElement>('.modal-sync-line').forEach(line => line.style.left = mainCssCalc);
+    };
 
   const handleZoom = () => {
     if (refAreaLeft === refAreaRight || refAreaLeft === null || refAreaRight === null) { setRefAreaLeft(null); setRefAreaRight(null); return; }
@@ -709,69 +735,94 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
               ) : (<p style={{ color: '#555', fontSize: '0.8rem', margin: 0 }}>Brak wczytanych parametrów.</p>)}
             </div>
           </div>
-
+                
           {/* --- TABELA WSKAŹNIKÓW (MAE, MSE...) --- */}
           {combinedData.length > 0 && isFile && statsData && (
             <div style={{ marginBottom: '15px' }}>
-              <div style={{ background: '#141414', padding: '1rem', borderRadius: '8px', border: '1px solid #2a2a2a', overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', color: '#fff', fontSize: '0.85rem' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ padding: '6px', borderBottom: '1px solid #333', borderRight: '1px solid #333' }}></th>
-                      <th colSpan={statsData.aCols.length} style={{ padding: '6px', borderBottom: '1px solid #333', borderRight: '1px solid #333', color: '#888' }}>Odchylenia Kątowe [°]</th>
-                      <th colSpan={statsData.curCols.length} style={{ padding: '6px', borderBottom: '1px solid #333', color: '#888' }}>Odchylenia Prądowe [%]</th>
-                    </tr>
-                    <tr>
-                      <th style={{ padding: '6px', borderBottom: '1px solid #333', borderRight: '1px solid #333', color: '#666', textAlign: 'left' }}>Metryka</th>
-                      {statsData?.aCols?.map((c: string) => <th key={c} style={{ padding: '6px', borderBottom: '1px solid #333', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #333' : 'none', color: '#aaa' }}>{c}</th>)}
-                      {statsData?.curCols?.map((c: string) => <th key={c} style={{ padding: '6px', borderBottom: '1px solid #333', color: '#aaa' }}>{c}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {METRICS.map(metric => (
-                      <tr key={metric}>
-                        <td style={{ padding: '6px', borderBottom: '1px solid #222', borderRight: '1px solid #333', textAlign: 'left', fontWeight: 'bold', color: '#00bcd4' }}>{metric}</td>
-                        {statsData.aCols.map((c: any) => { 
-                            const val = statsData.errors[metric][c]; 
-                            const bgColor = getErrorColor(val, statsData.maxes.A[metric]); 
-                            const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.1)');
-                            const isExceeded = statsData.exceededLimits?.[metric]?.[c] || false;
-                            return (
-                            <td key={c} style={{ padding: '4px', borderBottom: '1px solid #222', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #333' : 'none' }}>
-                                <div style={{ background: `linear-gradient(180deg, #1a1a1a 0%, ${lightBg} 100%)`, borderBottom: `2px solid ${bgColor}`, padding: '4px', borderRadius: '4px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-                                  <span>{val.toFixed(4)}</span>{isExceeded && <span title="Przekroczono limit 3σ" style={{ cursor: 'help', fontSize: '0.9rem' }}>⚠️</span>}
-                                </div>
-                            </td>
-                            ); 
-                        })}
-                        {statsData.curCols.map((c: any) => { 
-                            const val = statsData.errors[metric][c]; 
-                            const bgColor = getErrorColor(val, statsData.maxes.A[metric]); 
-                            const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.1)');
-                            const isExceeded = statsData.exceededLimits?.[metric]?.[c] || false;
-                            return (
-                            <td key={c} style={{ padding: '4px', borderBottom: '1px solid #222', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #333' : 'none' }}>
-                                <div style={{ background: `linear-gradient(180deg, #1a1a1a 0%, ${lightBg} 100%)`, borderBottom: `2px solid ${bgColor}`, padding: '4px', borderRadius: '4px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-                                  <span>{val.toFixed(4)}</span>{isExceeded && <span title="Przekroczono limit 3σ" style={{ cursor: 'help', fontSize: '0.9rem' }}>⚠️</span>}
-                                </div>
-                            </td>
-                            ); 
-                        })}
+              
+              {/* NAGŁÓWEK I PRZYCISK ZWIJANIA */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h3 style={{ color: '#00bcd4', margin: 0, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  📊 Szczegółowe wskaźniki błędu (Opcjonalnie)
+                </h3>
+                <button 
+                  onClick={() => setShowStatsTable(!showStatsTable)}
+                  style={{ background: 'transparent', color: '#00bcd4', border: '1px solid #00bcd4', borderRadius: '4px', padding: '4px 10px', fontSize: '0.8rem', cursor: 'pointer', transition: '0.2s', fontWeight: 'bold' }}
+                >
+                  {showStatsTable ? '▲ Ukryj tabelę' : '▼ Pokaż tabelę'}
+                </button>
+              </div>
+
+              {/* ZAWARTOŚĆ TABELI (Z płynną animacją CSS) */}
+              <div style={{ 
+                maxHeight: showStatsTable ? '800px' : '0px', 
+                opacity: showStatsTable ? 1 : 0, 
+                overflow: 'hidden', 
+                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+              }}>
+                <div style={{ background: '#141414', padding: '1rem', borderRadius: '8px', border: '1px solid #2a2a2a', overflowX: 'auto', marginTop: showStatsTable ? '5px' : '0' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'center', color: '#fff', fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: '6px', borderBottom: '1px solid #333', borderRight: '1px solid #333' }}></th>
+                        <th colSpan={statsData.aCols.length} style={{ padding: '6px', borderBottom: '1px solid #333', borderRight: '1px solid #333', color: '#888' }}>Odchylenia Kątowe [°]</th>
+                        <th colSpan={statsData.curCols.length} style={{ padding: '6px', borderBottom: '1px solid #333', color: '#888' }}>Odchylenia Prądowe [%]</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                      <tr>
+                        <th style={{ padding: '6px', borderBottom: '1px solid #333', borderRight: '1px solid #333', color: '#666', textAlign: 'left' }}>Metryka</th>
+                        {statsData?.aCols?.map((c: string) => <th key={c} style={{ padding: '6px', borderBottom: '1px solid #333', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #333' : 'none', color: '#aaa' }}>{c}</th>)}
+                        {statsData?.curCols?.map((c: string) => <th key={c} style={{ padding: '6px', borderBottom: '1px solid #333', color: '#aaa' }}>{c}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {METRICS.map(metric => (
+                        <tr key={metric}>
+                          <td style={{ padding: '6px', borderBottom: '1px solid #222', borderRight: '1px solid #333', textAlign: 'left', fontWeight: 'bold', color: '#00bcd4' }}>{metric}</td>
+                          
+                          {/* PĘTLA DLA KĄTÓW (A1-A6) */}
+                          {statsData.aCols.map((c: any) => { 
+                              const val = statsData.errors[metric][c]; 
+                              const bgColor = getErrorColor(val, statsData.maxes.A[metric]); 
+                              const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.1)');
+                              const isExceeded = statsData.exceededLimits?.[metric]?.[c] || false;
+                              return (
+                              <td key={c} style={{ padding: '4px', borderBottom: '1px solid #222', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #333' : 'none' }}>
+                                  <div style={{ background: `linear-gradient(180deg, #1a1a1a 0%, ${lightBg} 100%)`, borderBottom: `2px solid ${bgColor}`, padding: '4px', borderRadius: '4px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
+                                    <span>{val.toFixed(4)}</span>{isExceeded && <span title="Przekroczono limit" style={{ cursor: 'help', fontSize: '0.9rem' }}>⚠️</span>}
+                                  </div>
+                              </td>
+                              ); 
+                          })}
+                          
+                          {/* PĘTLA DLA PRĄDÓW (Cur1-Cur6) */}
+                          {statsData.curCols.map((c: any) => { 
+                              const val = statsData.errors[metric][c]; 
+                              const bgColor = getErrorColor(val, statsData.maxes.Cur[metric]); 
+                              const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.1)');
+                              const isExceeded = statsData.exceededLimits?.[metric]?.[c] || false;
+                              return (
+                              <td key={c} style={{ padding: '4px', borderBottom: '1px solid #222' }}>
+                                  <div style={{ background: `linear-gradient(180deg, #1a1a1a 0%, ${lightBg} 100%)`, borderBottom: `2px solid ${bgColor}`, padding: '4px', borderRadius: '4px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
+                                    <span>{val.toFixed(4)}</span>{isExceeded && <span title="Przekroczono limit" style={{ cursor: 'help', fontSize: '0.9rem' }}>⚠️</span>}
+                                  </div>
+                              </td>
+                              ); 
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
               
           {/* --- SEGMENTED CONTROL (PRZEŁĄCZANIE WIDOKU) --- */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#141414', padding: '10px 15px', borderRadius: '8px', border: '1px solid #2a2a2a', marginBottom: '15px' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'center', background: '#141414', padding: '10px 15px', borderRadius: '8px', border: '1px solid #2a2a2a', marginBottom: '15px' }}>
             
             <div style={{ display: 'flex', background: '#111', borderRadius: '6px', padding: '4px', border: '1px solid #333' }}>
               {[
-                { id: 'detailed', icon: '🔍', label: 'Pojedynczy' },
-                { id: 'combined', icon: '📊', label: 'Wspólny' },
+                { id: 'combined', icon: '📊', label: 'Wspólny (Siatka osi)' },
                 { id: 'batch', icon: '📑', label: 'Folder (Batch)' }
               ].map(mode => (
                 <button 
@@ -788,19 +839,6 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                 </button>
               ))}
             </div>
-            
-            {viewMode === 'detailed' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                <button onClick={() => setShowParamsModal(true)} style={{ padding: '6px 12px', background: 'rgba(33, 150, 243, 0.1)', color: '#2196f3', border: '1px solid rgba(33, 150, 243, 0.3)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                  📊 Pokaż parametry osi
-                </button>
-                {zoomRange && (
-                  <button onClick={() => setZoomRange(null)} style={{ padding: '6px 12px', background: 'rgba(233, 30, 99, 0.15)', color: '#e91e63', border: '1px solid rgba(233, 30, 99, 0.4)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                    ✕ Reset Zoom
-                  </button>
-                )}
-              </div>
-            )}
           </div>
 
           {/* WIDOK: BATCH */}
@@ -986,110 +1024,10 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
               )}
             </div>
             
-          ) : viewMode === 'detailed' ? (
-            <>
-              {/* WIDOK: SZCZEGÓŁY POJEDYNCZEJ OSI */}
-              <div style={{ marginBottom: '15px', background: '#141414', padding: '10px 15px', borderRadius: '8px', border: '1px solid #2a2a2a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-                  <span style={{ color: '#888', fontSize: '0.9rem' }}>Aktywna Oś (Sygnał):</span>
-                  <select value={selectedColumn} onChange={(e) => setSelectedColumn(e.target.value)} style={{ padding: '6px 12px', borderRadius: '4px', background: '#1a1a1a', color: 'white', border: '1px solid #444', cursor: 'pointer', outline: 'none' }}>
-                    {availableColumns.map(col => (<option key={col} value={col}>{col} {getUnit(col) ? `[${getUnit(col)}]` : ''}</option>))}
-                  </select>
-                </div>
-                {(() => {
-                  const failureThreshold = robotInfo?.config?.max_violation_threshold || 5.0;
-                  const badgeColor = violationPercent === 0 ? '#4caf50' : violationPercent >= failureThreshold ? '#f44336' : '#ff9800';
-                  return (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <span style={{ color: '#888', fontSize: '0.9rem' }}>Udział awarii:</span>
-                      <span style={{ background: badgeColor, color: '#fff', padding: '4px 12px', borderRadius: '4px', fontWeight: 'bold', fontSize: '0.95rem' }}>{violationPercent === 0 ? '0.00%' : `${violationPercent.toFixed(2)}%`}</span>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* GÓRNY WYKRES */}
-              <h3 style={{ color: '#fff', marginBottom: '0.5rem', borderBottom: '1px solid #333', paddingBottom: '5px', fontSize: '1rem' }}>Porównanie z referencją <span style={{opacity: 0.5}}>[{unit}]</span></h3>
-              <div style={{ height: '280px', background: '#141414', padding: '1rem', borderRadius: '8px', border: '1px solid #2a2a2a', marginBottom: '2rem', position: 'relative' }}>
-                
-                {showTimeMarker && (
-                    <div ref={mainChartLineRef} style={{ position: 'absolute', top: 15, bottom: 25, width: '2px', backgroundColor: '#2196f3', left: '90px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 8px rgba(33,150,243,0.5)' }}>
-                      <div style={{ position: 'absolute', top: -15, left: -25, color: '#2196f3', fontSize: '10px', fontWeight: 'bold', width: '60px', textAlign: 'center' }}>POZ. 3D</div>
-                    </div>
-                )}
-
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={displayedData} margin={{ top: 10, right: 10, left: 10, bottom: 5 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
-                    <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#555" hide />
-                    
-                    <YAxis width={62} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 11}} label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#555', fontSize: 12 }} />
-                    
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#333', borderRadius: '6px' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => { if (Array.isArray(v)) return [`od ${v[0].toFixed(2)} do ${v[1].toFixed(2)} ${unit}`, name]; return [`${Number(v).toFixed(2)} ${unit}`, name]; }} />
-                    <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={{ fontSize: '0.85rem', color: '#888' }} />
-                    
-                    {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.2} strokeOpacity={0} />))}
-                    <Line name="Referencja" type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                    <Line name="Badany" type="monotone" dataKey="Badany" stroke="#ffeb3b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                    
-                    {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0} fill="#2196f3" fillOpacity={0.2} />}
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* POPUP PARAMETRÓW (Modal) */}
-              {showParamsModal && (
-                <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.85)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(5px)' }}>
-                  <div style={{ background: '#141414', width: '500px', borderRadius: '12px', border: '1px solid #333', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.8)' }}>
-                      <div style={{ padding: '1rem 1.5rem', background: '#1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333' }}>
-                        <h3 style={{ margin: 0, color: '#2196f3', fontSize: '1.1rem' }}>📉 Statystyki sygnału: {selectedColumn}</h3>
-                        <button onClick={() => setShowParamsModal(false)} style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '1.2rem', transition: '0.2s' }} onMouseEnter={e=>e.currentTarget.style.color='#fff'} onMouseLeave={e=>e.currentTarget.style.color='#888'}>✕</button>
-                      </div>
-                      <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                        <SignalStatsTable title="Sygnał Badany (Surowy)" stats={diagnosis?.statsData?.signalParams?.[selectedColumn]?.raw} unit={unit} color="#ffeb3b" />
-                        <SignalStatsTable title="Różnica (Badany - Referencja)" stats={diagnosis?.statsData?.signalParams?.[selectedColumn]?.diff} unit={unit} color="#ff5722" />
-                      </div>
-                    </div>
-                </div>
-              )}
-
-              {/* DOLNY WYKRES */}
-              <h3 style={{ color: '#ff5722', marginBottom: '0.5rem', borderBottom: '1px solid #333', paddingBottom: '5px', fontSize: '1rem' }}>Obliczona różnica sygnałów <span style={{opacity: 0.5}}>[{unit}]</span></h3>
-              <div style={{ height: '200px', background: '#141414', padding: '1rem', borderRadius: '8px', border: '1px solid #2a2a2a', position: 'relative' }}>
-                
-                {showTimeMarker && (
-                    <div ref={diffChartLineRef} style={{ position: 'absolute', top: 15, bottom: 25, width: '2px', backgroundColor: '#2196f3', left: '90px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 8px rgba(33,150,243,0.5)' }}>
-                      <div style={{ position: 'absolute', top: -15, left: -25, color: '#2196f3', fontSize: '10px', fontWeight: 'bold', width: '60px', textAlign: 'center' }}>POZ. 3D</div>
-                    </div>
-                )}
-
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={displayedData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
-                    <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
-                    <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#555" tick={{fontSize: 11}} label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#888', fontSize: 11 }} />
-                    <YAxis width={62} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 11}} label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#555', fontSize: 12 }} />
-                    
-                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#333', borderRadius: '6px' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => {
-                      const strName = String(name);
-                      if (strName === "DiffUpper" || strName === "DiffLower") return [`${Number(v).toFixed(2)} ${unit}`, 'Limit tolerancji'];
-                      return [`${Number(v).toFixed(2)} ${unit}`, 'Δ Różnica'];
-                    }} />
-                    {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.2} strokeOpacity={0} />))}
-                    
-                    {/* ZROBIONO: Limity przeniesione na wykres różnic */}
-                    <Line name="DiffUpper" type="stepAfter" dataKey="DiffUpper" stroke="#555" strokeDasharray="4 4" dot={false} strokeOpacity={0.8} isAnimationActive={false} legendType="none" />
-                    <Line name="DiffLower" type="stepAfter" dataKey="DiffLower" stroke="#555" strokeDasharray="4 4" dot={false} strokeOpacity={0.8} isAnimationActive={false} legendType="none" />
-                    
-                    <Line name="Δ Odchylenie (Badany - Ref)" type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                    {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0} fill="#2196f3" fillOpacity={0.2} />}
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </>
-          ) : (
+            ):(
             
         /* WIDOK: WSPÓLNY (Siatka Mini-wykresów) */
-          <div style={{ display: 'flex', flexDirection: 'column', marginTop: '1rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', marginTop: '1rem' }}>
             {(() => {
               const allCols = [...(statsData?.aCols || []), ...(statsData?.curCols || [])];
               const isAllExpanded = expandedResiduals.length > 0 && expandedResiduals.length === allCols.length;
@@ -1099,8 +1037,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
 
               return (
                 <>
-                
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginBottom: '10px' }}>
                     <button 
                       onClick={() => setShowRawDiff(!showRawDiff)} 
                       style={{ background: showRawDiff ? 'rgba(156, 39, 176, 0.2)' : 'transparent', color: showRawDiff ? '#e1bee7' : '#888', border: `1px solid ${showRawDiff ? '#9c27b0' : '#444'}`, borderRadius: '4px', padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', transition: '0.2s' }}
@@ -1110,8 +1047,6 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                     <button 
                       onClick={toggleAll} 
                       style={{ background: 'rgba(33, 150, 243, 0.1)', color: '#2196f3', border: '1px solid rgba(33, 150, 243, 0.3)', borderRadius: '4px', padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', transition: '0.2s' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(33, 150, 243, 0.2)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'rgba(33, 150, 243, 0.1)'}
                     >
                       {isAllExpanded ? '▲ Zwiń wszystkie residua' : '▼ Rozwiń wszystkie residua'}
                     </button>
@@ -1127,6 +1062,8 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0}
                           isExpanded={expandedResiduals.includes(col)}
                           onToggleExpand={() => toggleSingle(col)}
+                          showRawDiff={showRawDiff} // <--- NAPRAWA: Zapewnienie dostępu do stanu
+                          onMaximize={() => handleMaximize(col)}
                         />
                       ))}
                     </div>
@@ -1140,6 +1077,8 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0}
                           isExpanded={expandedResiduals.includes(col)}
                           onToggleExpand={() => toggleSingle(col)}
+                          showRawDiff={showRawDiff}
+                          onMaximize={() => handleMaximize(col)} 
                         />
                       ))}
                     </div>
@@ -1152,6 +1091,203 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
         </div>
       ) : ( <div style={{ marginTop: '2rem', padding: '3rem', border: '2px dashed #2a2a2a', borderRadius: '12px', color: '#666', textAlign: 'center' }}>Wybierz robota z drzewka plików, aby załadować przebieg...</div> )}
   
+{/* ========================================================= */}
+      {/* MODAL PEŁNOEKRANOWY (ZOOM DLA WIDOKU WSPÓLNEGO)             */}
+      {/* ========================================================= */}
+      {maximizedAxis && (
+        <>
+          {/* DEFINICJA PŁYNNYCH ANIMACJI CSS */}
+          <style>
+            {`
+              @keyframes modalBackdropFade {
+                from { opacity: 0; backdrop-filter: blur(0px); }
+                to { opacity: 1; backdrop-filter: blur(8px); }
+              }
+              @keyframes modalContentPop {
+                from { opacity: 0; transform: scale(0.95) translateY(20px); }
+                to { opacity: 1; transform: scale(1) translateY(0); }
+              }
+            `}
+          </style>
+          
+          {/* TŁO MODALA Z ANIMACJĄ FADE */}
+          <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', background: 'rgba(0,0,0,0.85)', zIndex: 4000, display: 'flex', justifyContent: 'center', alignItems: 'center', animation: 'modalBackdropFade 0.3s ease-out forwards' }}>
+            
+            {/* GŁÓWNE OKNO Z ANIMACJĄ POP-UP */}
+            <div style={{ width: '95%', maxWidth: '1600px', height: '90vh', background: '#111', borderRadius: '12px', border: '1px solid #333', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.8)', animation: 'modalContentPop 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards' }}>
+              
+              {/* NAGŁÓWEK MODALA */}
+              <div style={{ padding: '15px 20px', background: '#1a1a1a', borderBottom: '1px solid #333', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                  <h2 style={{ margin: 0, color: '#2196f3', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    ⛶ Szczegółowa analiza osi: {maximizedAxis} <span style={{opacity: 0.5, fontSize: '1rem'}}>[{unit}]</span>
+                  </h2>
+                  {zoomRange && (
+                    <button onClick={() => setZoomRange(null)} style={{ padding: '6px 12px', background: 'rgba(233, 30, 99, 0.15)', color: '#e91e63', border: '1px solid rgba(233, 30, 99, 0.4)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}>
+                      ✕ Reset Zoom
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => setShowRawDiff(!showRawDiff)} 
+                    style={{ background: showRawDiff ? 'rgba(255, 235, 59, 0.15)' : 'transparent', color: showRawDiff ? '#fff59d' : '#888', border: `1px solid ${showRawDiff ? '#fbc02d' : '#444'}`, borderRadius: '4px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer', transition: '0.2s', marginLeft: '20px' }}
+                  >
+                    👁️ {showRawDiff ? 'Ukryj surowy sygnał' : 'Pokaż surowy sygnał'}
+                  </button>
+                  
+                  {/* PRZENIESIONY PRZYCISK STATYSTYK */}
+                  <button 
+                    onClick={() => setShowParamsModal(true)} 
+                    style={{ background: 'rgba(33, 150, 243, 0.1)', color: '#2196f3', border: '1px solid rgba(33, 150, 243, 0.3)', borderRadius: '4px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 'bold', marginLeft: '10px' }}
+                  >
+                    📊 Parametry statystyczne
+                  </button>
+                </div>
+                <button onClick={() => { setMaximizedAxis(null); setZoomRange(null); setShowModal3D(false); }} style={{ background: 'transparent', border: 'none', color: '#aaa', fontSize: '2.5rem', cursor: 'pointer', transition: '0.2s', lineHeight: '1rem' }} onMouseEnter={e=>e.currentTarget.style.color='#fff'} onMouseLeave={e=>e.currentTarget.style.color='#aaa'}>×</button>
+              </div>
+
+              {/* ZAWARTOŚĆ MODALA (Wykresy | Pionowy Przycisk | Panel 3D) */}
+              <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+                
+                {/* LEWA STRONA (Wykresy) */}
+                <div style={{ padding: '20px', overflowY: 'auto', flex: 1, transition: 'all 0.3s' }}>
+                   {/* 1. GÓRNY WYKRES W MODALU */}
+                   <div style={{ height: '35vh', background: '#141414', padding: '1rem', borderRadius: '8px', border: '1px solid #2a2a2a', marginBottom: '20px', position: 'relative' }}>
+                     {showTimeMarker && (
+                        <div className="modal-sync-line" style={{ position: 'absolute', top: 15, bottom: 25, width: '2px', backgroundColor: '#2196f3', left: '90px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 8px rgba(33,150,243,0.5)' }} />
+                     )}
+                     <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={displayedData} margin={{ top: 10, right: 10, left: 10, bottom: 5 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#222" vertical={false} />
+                          <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#555" hide />
+                          <YAxis width={62} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 11}} label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#555', fontSize: 12 }} />
+                          <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#333', borderRadius: '6px' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => { 
+                            const strName = String(name);
+                            if (strName === "Badany") return [`${Number(v).toFixed(2)} ${unit}`, 'Badany (Surowy)'];
+                            if (strName === "BadanyKomp") return [`${Number(v).toFixed(2)} ${unit}`, 'Badany (Po komp.)'];
+                            if (Array.isArray(v)) return [`od ${v[0].toFixed(2)} do ${v[1].toFixed(2)} ${unit}`, name]; 
+                            return [`${Number(v).toFixed(2)} ${unit}`, name]; 
+                          }} />
+                          <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={{ fontSize: '0.85rem', color: '#888' }} />
+                          {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.2} strokeOpacity={0} />))}
+                          
+                          <Line name="Referencja" type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                          <Line hide={!showRawDiff} name="Badany (Surowy przed komp.)" type="monotone" dataKey="Badany" stroke="#ffeb3b" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} opacity={0.5} />
+                          <Line name="Badany (Po komp.)" type="monotone" dataKey="BadanyKomp" stroke="#ffeb3b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                          {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0} fill="#2196f3" fillOpacity={0.2} />}
+                        </ComposedChart>
+                     </ResponsiveContainer>
+                   </div>
+
+                   {/* 2. DOLNY WYKRES RÓŻNICOWY W MODALU */}
+                   <h3 style={{ color: '#ff5722', marginBottom: '0.5rem', borderBottom: '1px solid #333', paddingBottom: '5px', fontSize: '1rem' }}>Różnica sygnałów w powiększeniu</h3>
+                   <div style={{ height: '35vh', background: '#141414', padding: '1rem', borderRadius: '8px', border: '1px solid #2a2a2a', position: 'relative' }}>
+                     {showTimeMarker && (
+                        <div className="modal-sync-line" style={{ position: 'absolute', top: 15, bottom: 25, width: '2px', backgroundColor: '#2196f3', left: '90px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 8px rgba(33,150,243,0.5)' }} />
+                     )}
+                     <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={displayedData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
+                          <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
+                          <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#555" tick={{fontSize: 11}} label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#888', fontSize: 11 }} />
+                          <YAxis width={62} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 11}} label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#555', fontSize: 12 }} />
+                          <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#333', borderRadius: '6px' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => {
+                            const strName = String(name);
+                            if (strName === "DiffUpper" || strName === "DiffLower") return [`${Number(v).toFixed(2)} ${unit}`, 'Limit tolerancji'];
+                            return [`${Number(v).toFixed(2)} ${unit}`, 'Δ Różnica'];
+                          }} />
+                          {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.2} strokeOpacity={0} />))}
+                          
+                          <Line name="DiffUpper" type="stepAfter" dataKey="DiffUpper" stroke="#555" strokeDasharray="4 4" dot={false} strokeOpacity={0.8} isAnimationActive={false} legendType="none" />
+                          <Line name="DiffLower" type="stepAfter" dataKey="DiffLower" stroke="#555" strokeDasharray="4 4" dot={false} strokeOpacity={0.8} isAnimationActive={false} legendType="none" />
+                          
+                          <Line hide={!showRawDiff} name="Δ Surowa (bez komp.)" type="monotone" dataKey="RoznicaRaw" stroke="#888" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
+                          <Line name="Δ Odchylenie (Po komp.)" type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                          {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0} fill="#2196f3" fillOpacity={0.2} />}
+                        </LineChart>
+                     </ResponsiveContainer>
+                   </div>
+                </div>
+
+                {/* PRZYCISK KRAWĘDZIOWY WSUWANY (Pionowa zakładka) */}
+                <div 
+                  onClick={() => setShowModal3D(!showModal3D)}
+                  title={showModal3D ? "Schowaj widok 3D" : "Otwórz cyfrowego bliźniaka 3D"}
+                  style={{
+                    width: '35px',
+                    background: showModal3D ? '#1a1a1a' : '#222',
+                    borderLeft: '1px solid #333',
+                    borderRight: showModal3D ? '1px solid #333' : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    zIndex: 10,
+                    boxShadow: showModal3D ? 'none' : '-3px 0 10px rgba(0,0,0,0.4)'
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#2196f3'}
+                  onMouseLeave={e => e.currentTarget.style.background = showModal3D ? '#1a1a1a' : '#222'}
+                >
+                  <span style={{ 
+                    writingMode: 'vertical-rl', 
+                    transform: 'rotate(180deg)', 
+                    color: '#fff', 
+                    fontWeight: 'bold', 
+                    letterSpacing: '2px', 
+                    fontSize: '0.85rem' 
+                  }}>
+                    {showModal3D ? '▶ UKRYJ 3D' : '◀ WIDOK 3D'}
+                  </span>
+                </div>
+
+                {/* PRAWA STRONA (Wysuwany Odtwarzacz 3D) */}
+                <div style={{ 
+                    width: showModal3D ? '520px' : '0px', 
+                    opacity: showModal3D ? 1 : 0, 
+                    overflow: 'hidden', 
+                    transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)', 
+                    background: '#0d0d0d' 
+                }}>
+                  <div style={{ width: '520px', padding: '10px 20px', height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
+                    <div style={{ marginTop: '-1rem' }}>
+                      {/* Warunkowe renderowanie: montuje i renderuje 3D tylko gdy jest to widoczne! Oszczędność CPU/GPU */}
+                      {showModal3D && (
+                        <RobotPlayer3D 
+                          trajectory={trajectory}
+                          refTrajectory={refTrajectory}
+                          showGhost={showGhost}
+                          setShowGhost={setShowGhost}
+                          displayedData={displayedData}
+                          testData={testData}
+                          playbackIndex={playbackIndex}
+                          setPlaybackIndex={setPlaybackIndex}
+                          handleLiveScrub={handleLiveScrub}
+                          isTrajectoryLoading={isTrajectoryLoading}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+                </div>
+                </div>
+                {/* POPUP PARAMETRÓW STATYSTYCZNYCH OSI */}
+              {showParamsModal && (
+                <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.6)', zIndex: 3000, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(3px)' }}>
+                  <div style={{ background: '#141414', width: '500px', borderRadius: '12px', border: '1px solid #333', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.8)' }}>
+                      <div style={{ padding: '1rem 1.5rem', background: '#1a1a1a', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333' }}>
+                        <h3 style={{ margin: 0, color: '#2196f3', fontSize: '1.1rem' }}>📉 Statystyki sygnału: {selectedColumn}</h3>
+                        <button onClick={() => setShowParamsModal(false)} style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer', fontSize: '1.2rem', transition: '0.2s' }} onMouseEnter={e=>e.currentTarget.style.color='#fff'} onMouseLeave={e=>e.currentTarget.style.color='#888'}>✕</button>
+                      </div>
+                      <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                        <SignalStatsTable title="Sygnał Badany (Surowy)" stats={diagnosis?.statsData?.signalParams?.[selectedColumn]?.raw} unit={unit} color="#ffeb3b" />
+                        <SignalStatsTable title="Różnica (Badany - Referencja)" stats={diagnosis?.statsData?.signalParams?.[selectedColumn]?.diff} unit={unit} color="#ff5722" />
+                      </div>
+                    </div>
+                </div>
+              )}      
+              </div>
+              
+        </>
+      )}
       {/* ========================================================= */}
       {/* SEKCJA 3D: CYFROWY BLIŹNIAK (Z Odtwarzaczem) */}
       {/* ========================================================= */}
