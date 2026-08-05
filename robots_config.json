@@ -108,8 +108,8 @@
     "24_07_2026_temperatura": {
         "model": "Nieokreślony",
         "location": "",
-        "diagnosis_type": "Odchylenie (offsetowe)",
-        "ai_model_id": "",
+        "diagnosis_type": "AI",
+        "ai_model_id": "group_1785704533",
         "max_violation_threshold": 6,
         "a_deviation_threshold": 2,
         "cur_deviation_threshold": 2,
@@ -119,10 +119,10 @@
         "a_offset_threshold": 0.1,
         "cur_offset_threshold": 7,
         "sigma_multiplier": 3,
-        "mae_threshold": 1,
-        "mse_threshold": 1,
-        "iae_threshold": 50,
-        "ise_threshold": 100,
+        "mae_threshold": 9.4,
+        "mse_threshold": 80.9,
+        "iae_threshold": 9.3,
+        "ise_threshold": 80.6,
         "thermal_config": {
             "A1": {
                 "a": 4.620832371038424,
@@ -154,7 +154,15 @@
                 "b": -18.375048933675455,
                 "c": 0
             }
-        }
+        },
+        "a_mae_threshold": 0.1,
+        "a_mse_threshold": 0.1,
+        "a_iae_threshold": 0.1,
+        "a_ise_threshold": 0.1,
+        "cur_mae_threshold": 9.4,
+        "cur_mse_threshold": 80.9,
+        "cur_iae_threshold": 9.3,
+        "cur_ise_threshold": 80.6
     },
     "24_07_2026_ruch_ref_temp": {
         "model": "Nieokreślony",
@@ -206,5 +214,25 @@
                 "c": 0
             }
         }
+    },
+    "23_07_temp": {
+        "model": "Nieokreślony",
+        "location": "",
+        "diagnosis_type": "Wskaźniki",
+        "ai_model_id": "",
+        "max_violation_threshold": 5,
+        "a_deviation_threshold": 2,
+        "cur_deviation_threshold": 2,
+        "a_deadband_threshold": 0.05,
+        "cur_deadband_threshold": 0.05,
+        "tuning_mode": "okno",
+        "a_offset_threshold": 0.1,
+        "cur_offset_threshold": 5,
+        "sigma_multiplier": 3,
+        "mae_threshold": 20.5,
+        "mse_threshold": 442.6,
+        "iae_threshold": 20.6,
+        "ise_threshold": 449.9,
+        "thermal_config": {}
     }
 }

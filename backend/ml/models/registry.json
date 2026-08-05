@@ -2,6 +2,249 @@
     "active_model_id": null,
     "models": [
         {
+            "group_id": "group_1785868908",
+            "name": "LOF_auto_poprawiony",
+            "algorithm": "LOF",
+            "contamination": -1,
+            "created_at": "2026-08-04 20:41:52",
+            "files_used_count": 33,
+            "window_size": -1,
+            "step_size": -1,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ],
+            "comment": ""
+        },
+        {
+            "group_id": "group_1785868797",
+            "name": "SVM_auto_poprawiony",
+            "algorithm": "One-Class SVM",
+            "contamination": -1,
+            "created_at": "2026-08-04 20:39:59",
+            "files_used_count": 33,
+            "window_size": -1,
+            "step_size": -1,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        },
+        {
+            "group_id": "group_1785866623",
+            "name": "Forest_temperatury_nowysystemauto",
+            "algorithm": "Isolation Forest",
+            "contamination": -1,
+            "created_at": "2026-08-04 20:04:18",
+            "files_used_count": 30,
+            "window_size": -1,
+            "step_size": -1,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ],
+            "comment": "goodshit"
+        },
+        {
+            "group_id": "group_1785866189",
+            "name": "LOF_temperatury_manual",
+            "algorithm": "LOF",
+            "contamination": 0.02,
+            "created_at": "2026-08-04 19:56:31",
+            "files_used_count": 30,
+            "window_size": 20,
+            "step_size": 5,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ],
+            "comment": ""
+        },
+        {
+            "group_id": "group_1785865991",
+            "name": "LOF_temperatury",
+            "algorithm": "LOF",
+            "contamination": -1,
+            "created_at": "2026-08-04 19:53:19",
+            "files_used_count": 30,
+            "window_size": -1,
+            "step_size": -1,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        },
+        {
+            "group_id": "group_1785865862",
+            "name": "SVM_temperatury",
+            "algorithm": "One-Class SVM",
+            "contamination": -1,
+            "created_at": "2026-08-04 19:51:18",
+            "files_used_count": 30,
+            "window_size": -1,
+            "step_size": -1,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        },
+        {
+            "group_id": "group_1785707120",
+            "name": "Model_24_07_2026_temperaturaAUTO_pierwszych_Bazowy",
+            "algorithm": "Isolation Forest",
+            "contamination": -1,
+            "created_at": "2026-08-02 23:46:03",
+            "files_used_count": 30,
+            "window_size": -1,
+            "step_size": -1,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        },
+        {
+            "group_id": "group_1785706624",
+            "name": "Model_24_07_2026_temperatura_Bazowy",
+            "algorithm": "Isolation Forest",
+            "contamination": 0.02,
+            "created_at": "2026-08-02 23:37:10",
+            "files_used_count": 33,
+            "window_size": 30,
+            "step_size": 3,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        },
+        {
+            "group_id": "group_1785704533",
+            "name": "Model_24_07_2026_temperatura_Bazowy",
+            "algorithm": "Isolation Forest",
+            "contamination": -1,
+            "created_at": "2026-08-02 23:02:18",
+            "files_used_count": 33,
+            "window_size": -1,
+            "step_size": -1,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        },
+        {
+            "group_id": "group_1785704247",
+            "name": "Model_24_07_2026_ruch_ref_temp_Bazowy",
+            "algorithm": "Isolation Forest",
+            "contamination": -1,
+            "created_at": "2026-08-02 22:57:32",
+            "files_used_count": 15,
+            "window_size": -1,
+            "step_size": -1,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ]
+        },
+        {
             "group_id": "group_1782053093",
             "name": "Model 3 cont 0.03 LOF",
             "algorithm": "LOF",
@@ -23,7 +266,8 @@
                 "Cur4",
                 "Cur5",
                 "Cur6"
-            ]
+            ],
+            "comment": "acsac"
         },
         {
             "group_id": "group_1782053546",
@@ -74,5 +318,5 @@
             ]
         }
     ],
-    "active_model_group_id": null
+    "active_model_group_id": "group_1785704247"
 }

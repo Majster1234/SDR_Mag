@@ -10,9 +10,11 @@ export const getUnit = (colName: string) => {
   return '';
 };
 
-export const getErrorColor = (val: number, max: number) => {
-  if (max === 0) return 'hsl(120, 80%, 45%)';
-  const ratio = Math.min(Math.max(val / max, 0), 1);
-  const hue = (1 - ratio) * 120; 
-  return `hsl(${hue}, 80%, 45%)`;
+export const getErrorColor = (value: number, max: number) => {
+  if (max === 0) return 'hsl(120, 70%, 50%)'; // Domyślnie zielony
+  const ratio = Math.min(value / max, 1);
+  
+  // Hue 120 = Zielony, Hue 35 = Pomarańczowy. Omijamy całkowicie 0 (Czerwony)
+  const hue = 120 - (ratio * 85); 
+  return `hsl(${hue}, 80%, 50%)`;
 };

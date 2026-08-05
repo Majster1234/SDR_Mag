@@ -46,11 +46,15 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
   const [aOffset, setAOffset] = useState(0.1);
   const [curOffset, setCurOffset] = useState(5.0);
   const [sigmaMultiplier, setSigmaMultiplier] = useState(3.0);
-  const [maeThresh, setMaeThresh] = useState(1.0);
-  const [mseThresh, setMseThresh] = useState(1.0);
-  const [iaeThresh, setIaeThresh] = useState(50.0);
-  const [iseThresh, setIseThresh] = useState(100.0);
+  const [aMaeThresh, setAMaeThresh] = useState(1.0);
+  const [aMseThresh, setAMseThresh] = useState(1.0);
+  const [aIaeThresh, setAIaeThresh] = useState(1.0);
+  const [aIseThresh, setAIseThresh] = useState(1.0);
 
+  const [curMaeThresh, setCurMaeThresh] = useState(1.0);
+  const [curMseThresh, setCurMseThresh] = useState(1.0);
+  const [curIaeThresh, setCurIaeThresh] = useState(1.0);
+  const [curIseThresh, setCurIseThresh] = useState(1.0);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -62,6 +66,15 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
   // --- STAN DLA KOMPENSACJI TERMICZNEJ ---
   const [thermalConfig, setThermalConfig] = useState<any>({});
 
+  // --- ZMIANA: Zapisujemy pełne dane z API ---
+  const [availableSources, setAvailableSources] = useState<any[]>([]);
+
+  // --- STANY DLA AUTOKALIBRACJI WSKAŹNIKÓW ---
+  const [showMetricsModal, setShowMetricsModal] = useState(false);
+  const [metricsFiles, setMetricsFiles] = useState<string[]>([]);
+  const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
+  const [isMetricsCalibrating, setIsMetricsCalibrating] = useState(false);
+
   // 1. Inicjalne pobieranie list (Roboty i modele AI)
   useEffect(() => {
     const fetchGlobalData = async () => {
@@ -69,6 +82,7 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
         const resRobots = await fetch('http://127.0.0.1:8000/api/ml/sources');
         if (resRobots.ok) {
           const data = await resRobots.json();
+          setAvailableSources(data.sources); // <--- NOWE
           setAvailableRobots(data.sources.map((s: any) => s.robot_name));
         }
 
@@ -84,6 +98,68 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
     fetchGlobalData();
   }, []);
 
+  const openMetricsCalibration = async () => {
+    setShowMetricsModal(true);
+    setMetricsFiles([]);
+    setSelectedMetrics([]);
+    setIsMetricsCalibrating(true); // Używamy tego stanu jako flagi ładowania na czas pobierania
+
+    try {
+      // Pobieramy świeżą listę bezpośrednio w momencie otwarcia okienka
+      const res = await fetch('http://127.0.0.1:8000/api/ml/sources');
+      if (res.ok) {
+        const data = await res.json();
+        const robotData = data.sources.find((s: any) => s.robot_name === selectedRobot);
+        
+        if (robotData && robotData.test_files && robotData.test_files.length > 0) {
+            setMetricsFiles(robotData.test_files);
+            setSelectedMetrics(robotData.test_files); // Domyślnie zaznaczamy wszystkie
+        } else {
+            emitAppLog('warning', 'Nie znaleziono żadnych plików testowych CSV w folderze tego robota.');
+        }
+      }
+    } catch (e) {
+      emitAppLog('error', 'Błąd podczas pobierania listy plików do kalibracji.');
+    }
+    
+    setIsMetricsCalibrating(false);
+  };
+
+  const toggleMetricFile = (file: string) => {
+    setSelectedMetrics(prev => prev.includes(file) ? prev.filter(f => f !== file) : [...prev, file]);
+  };
+
+  const runMetricsCalibration = async () => {
+    if (selectedMetrics.length === 0) return alert("Wybierz przynajmniej jeden plik!");
+    setIsMetricsCalibrating(true);
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/metrics-calibration', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ robot_name: selectedRobot, test_files: selectedMetrics })
+      });
+      const data = await res.json();
+     if (data.status === 'success') {
+         setAMaeThresh(data.suggested_thresholds_a.MAE);
+         setAMseThresh(data.suggested_thresholds_a.MSE);
+         setAIaeThresh(data.suggested_thresholds_a.IAE);
+         setAIseThresh(data.suggested_thresholds_a.ISE);
+
+         setCurMaeThresh(data.suggested_thresholds_cur.MAE);
+         setCurMseThresh(data.suggested_thresholds_cur.MSE);
+         setCurIaeThresh(data.suggested_thresholds_cur.IAE);
+         setCurIseThresh(data.suggested_thresholds_cur.ISE);
+         
+         setShowMetricsModal(false);
+         emitAppLog('success', 'Limity zostały dobrane automatycznie dla Kątów i Prądów!');
+      } else {
+         emitAppLog('error', data.error || 'Błąd autokalibracji');
+      }
+    } catch(e) {
+      emitAppLog('error', 'Błąd połączenia z serwerem');
+    }
+    setIsMetricsCalibrating(false);
+  };
+
   // 2. Reakcja na kliknięcie w drzewko (Sidebar)
   useEffect(() => {
     if (selectedFilePath) {
@@ -94,12 +170,16 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
     }
   }, [selectedFilePath]);
 
-  // 3. Pobieranie konfiguracji po zmianie wybranego robota
+ // 3. Pobieranie konfiguracji po zmianie wybranego robota
   useEffect(() => {
     if (!selectedRobot) return;
 
     const fetchConfig = async () => {
       setIsLoading(true);
+      
+      // NAPRAWA: Zawsze ustawiamy nazwę na wybranego robota, by pole nie było puste!
+      setNewFolderName(selectedRobot); 
+      
       try {
         const res = await fetch('http://127.0.0.1:8000/api/robot-info', {
           method: 'POST',
@@ -111,7 +191,6 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
           const data = await res.json();
           const cfg = data.config || {};
           
-          setNewFolderName(selectedRobot); // Domyślnie obecna nazwa
           setRobotModel(cfg.model || 'Nieokreślony');
           setLocation(cfg.location || '');
           setDiagnosisType(cfg.diagnosis_type || 'Odchylenia');
@@ -126,10 +205,15 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
           setAOffset(cfg.a_offset_threshold ?? 0.1);
           setCurOffset(cfg.cur_offset_threshold ?? 5.0);
           setSigmaMultiplier(cfg.sigma_multiplier ?? 3.0);
-          setMaeThresh(cfg.mae_threshold ?? 1.0);
-          setMseThresh(cfg.mse_threshold ?? 1.0);
-          setIaeThresh(cfg.iae_threshold ?? 50.0);
-          setIseThresh(cfg.ise_threshold ?? 100.0);
+          setAMaeThresh(cfg.a_mae_threshold ?? 1.0);
+          setAMseThresh(cfg.a_mse_threshold ?? 1.0);
+          setAIaeThresh(cfg.a_iae_threshold ?? 1.0);
+          setAIseThresh(cfg.a_ise_threshold ?? 1.0);
+
+          setCurMaeThresh(cfg.cur_mae_threshold ?? 1.0);
+          setCurMseThresh(cfg.cur_mse_threshold ?? 1.0);
+          setCurIaeThresh(cfg.cur_iae_threshold ?? 1.0);
+          setCurIseThresh(cfg.cur_ise_threshold ?? 1.0);
           setThermalConfig(cfg.thermal_config || {});
         }
       } catch (e) {
@@ -161,10 +245,14 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
       a_offset_threshold: aOffset,
       cur_offset_threshold: curOffset,
       sigma_multiplier: sigmaMultiplier,
-      mae_threshold: maeThresh,
-      mse_threshold: mseThresh,
-      iae_threshold: iaeThresh,
-      ise_threshold: iseThresh,
+      a_mae_threshold: aMaeThresh,
+      a_mse_threshold: aMseThresh,
+      a_iae_threshold: aIaeThresh,
+      a_ise_threshold: aIseThresh,
+      cur_mae_threshold: curMaeThresh,
+      cur_mse_threshold: curMseThresh,
+      cur_iae_threshold: curIaeThresh,
+      cur_ise_threshold: curIseThresh,
       thermal_config: thermalConfig,
     };
 
@@ -361,22 +449,42 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
             {diagnosisType === 'Odchylenia' && (
               <div style={{ background: '#222', padding: '15px', borderRadius: '4px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px', marginBottom: '15px' }}>
-                  <label style={labelStyle}>Tryb wyliczania tunelu
+                  <label style={labelStyle}>
+                    Tryb obliczania marginesu
                     <select value={tuningMode} onChange={e => setTuningMode(e.target.value)} style={inputStyle}>
-                      <option value="chwilowy">Punkt w punkt</option>
-                      <option value="okno">Koperta (Okno kroczące)</option>
-                      <option value="srednia">Względem średniej przejazdu</option>
+                      <option value="okno">Lokalne Okno (Zalecane - Proporcjonalne)</option>
+                      <option value="srednia">Średnia globalna sygnału (Proporcjonalne)</option>
+                      <option value="chwilowy">Wartość chwilowa (Sztywne stopnie/%)</option>
                     </select>
                   </label>
-                  <label style={labelStyle}>Max. udział awarii (%)
-                    <input type="number" step="1" value={maxViolation} onChange={e => setMaxViolation(Number(e.target.value))} style={inputStyle} />
+                  
+                  {/* DYNAMICZNE ETYKIETY W ZALEŻNOŚCI OD TRYBU */}
+                  <label style={labelStyle}>
+                    Tolerancja Kąta (A) 
+                    <span style={{color: '#2196f3', fontSize: '0.75rem', marginLeft: '5px'}}>
+                      {tuningMode === 'chwilowy' ? '[Sztywne Stopnie °]' : '[% amplitudy ruchu]'}
+                    </span>
+                    <input type="number" step="0.1" value={aDeviation} onChange={e => setADeviation(Number(e.target.value))} style={inputStyle} />
+                  </label>
+                  
+                  <label style={labelStyle}>
+                    Tolerancja Prądu (Cur) 
+                    <span style={{color: '#ffeb3b', fontSize: '0.75rem', marginLeft: '5px'}}>
+                      {tuningMode === 'chwilowy' ? '[Sztywne % prądu]' : '[% amplitudy ruchu]'}
+                    </span>
+                    <input type="number" step="0.1" value={curDeviation} onChange={e => setCurDeviation(Number(e.target.value))} style={inputStyle} />
                   </label>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '15px' }}>
-                  <label style={labelStyle}>Tol. Kątowa (%)<input type="number" step="0.5" value={aDeviation} onChange={e => setADeviation(Number(e.target.value))} style={inputStyle} /></label>
-                  <label style={labelStyle}>Tol. Prądowa (%)<input type="number" step="0.5" value={curDeviation} onChange={e => setCurDeviation(Number(e.target.value))} style={inputStyle} /></label>
-                  <label style={labelStyle}>Deadband Kąt. (°)<input type="number" step="0.01" value={aDeadband} onChange={e => setADeadband(Number(e.target.value))} style={inputStyle} /></label>
-                  <label style={labelStyle}>Deadband Prąd. (%)<input type="number" step="0.01" value={curDeadband} onChange={e => setCurDeadband(Number(e.target.value))} style={inputStyle} /></label>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+                  <label style={labelStyle}>
+                    Martwa strefa szumu Kąta (Min. tolerancja) [°]
+                    <input type="number" step="0.01" value={aDeadband} onChange={e => setADeadband(Number(e.target.value))} style={inputStyle} />
+                  </label>
+                  <label style={labelStyle}>
+                    Martwa strefa szumu Prądu (Min. tolerancja) [%]
+                    <input type="number" step="0.1" value={curDeadband} onChange={e => setCurDeadband(Number(e.target.value))} style={inputStyle} />
+                  </label>
                 </div>
               </div>
             )}
@@ -395,11 +503,32 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
             {/* KONTROLER: WSKAŹNIKI */}
             {diagnosisType === 'Wskaźniki' && (
               <div style={{ background: '#222', padding: '15px', borderRadius: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                    <span style={{ color: '#aaa', fontSize: '0.85rem' }}>Mnożniki graniczne dopuszczalnego błędu w stosunku do bazowego tunelu:</span>
+                    <button 
+                      onClick={openMetricsCalibration}
+                      style={{ background: '#9c27b0', color: '#fff', border: 'none', padding: '6px 15px', borderRadius: '4px', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}
+                    >
+                      <span>🛠️</span> Autokalibracja Limitów
+                    </button>
+                </div>
+                
+                {/* SEKCJA KĄTÓW */}
+                <h5 style={{ margin: '0 0 10px 0', color: '#00bcd4' }}>Kąty - Pozycje (A)</h5>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '15px', marginBottom: '15px', borderBottom: '1px solid #333', paddingBottom: '15px' }}>
+                  <label style={labelStyle}>Próg MAE (A)<input type="number" step="0.1" value={aMaeThresh} onChange={e => setAMaeThresh(Number(e.target.value))} style={inputStyle} /></label>
+                  <label style={labelStyle}>Próg MSE (A)<input type="number" step="0.1" value={aMseThresh} onChange={e => setAMseThresh(Number(e.target.value))} style={inputStyle} /></label>
+                  <label style={labelStyle}>Próg IAE (A)<input type="number" step="0.1" value={aIaeThresh} onChange={e => setAIaeThresh(Number(e.target.value))} style={inputStyle} /></label>
+                  <label style={labelStyle}>Próg ISE (A)<input type="number" step="0.1" value={aIseThresh} onChange={e => setAIseThresh(Number(e.target.value))} style={inputStyle} /></label>
+                </div>
+
+                {/* SEKCJA PRĄDÓW */}
+                <h5 style={{ margin: '0 0 10px 0', color: '#ffeb3b' }}>Prądy Silników (Cur)</h5>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '15px' }}>
-                  <label style={labelStyle}>Próg MAE (Kalibracja)<input type="number" step="0.5" value={maeThresh} onChange={e => setMaeThresh(Number(e.target.value))} style={inputStyle} /></label>
-                  <label style={labelStyle}>Próg MSE (Drgania)<input type="number" step="0.5" value={mseThresh} onChange={e => setMseThresh(Number(e.target.value))} style={inputStyle} /></label>
-                  <label style={labelStyle}>Próg IAE (Zużycie)<input type="number" step="5" value={iaeThresh} onChange={e => setIaeThresh(Number(e.target.value))} style={inputStyle} /></label>
-                  <label style={labelStyle}>Próg ISE (Kolizje)<input type="number" step="5" value={iseThresh} onChange={e => setIseThresh(Number(e.target.value))} style={inputStyle} /></label>
+                  <label style={labelStyle}>Próg MAE (Cur)<input type="number" step="0.1" value={curMaeThresh} onChange={e => setCurMaeThresh(Number(e.target.value))} style={inputStyle} /></label>
+                  <label style={labelStyle}>Próg MSE (Cur)<input type="number" step="0.1" value={curMseThresh} onChange={e => setCurMseThresh(Number(e.target.value))} style={inputStyle} /></label>
+                  <label style={labelStyle}>Próg IAE (Cur)<input type="number" step="0.1" value={curIaeThresh} onChange={e => setCurIaeThresh(Number(e.target.value))} style={inputStyle} /></label>
+                  <label style={labelStyle}>Próg ISE (Cur)<input type="number" step="0.1" value={curIseThresh} onChange={e => setCurIseThresh(Number(e.target.value))} style={inputStyle} /></label>
                 </div>
               </div>
             )}
@@ -476,6 +605,46 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
               </div>
             </div>
           )}
+          {/* MODAL AUTOKALIBRACJI WSKAŹNIKÓW */}
+          {showMetricsModal && (
+            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center', backdropFilter: 'blur(5px)' }}>
+              <div style={{ background: '#1e1e1e', padding: '30px', borderRadius: '12px', width: '600px', maxHeight: '80vh', display: 'flex', flexDirection: 'column', border: '1px solid #333', boxShadow: '0 10px 30px rgba(0,0,0,0.5)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #333', paddingBottom: '15px', marginBottom: '20px' }}>
+                  <h2 style={{ margin: 0, color: '#9c27b0', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '8px' }}>🛠️ Kalibrator Wskaźników Błędu</h2>
+                  <button onClick={() => setShowMetricsModal(false)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '1.8rem', cursor: 'pointer' }}>×</button>
+                </div>
+
+                <p style={{ color: '#aaa', fontSize: '0.85rem', marginBottom: '15px' }}>Zaznacz prawidłowe przejazdy (tzw. Złote Próbki), na podstawie których system automatycznie dopasuje limity MAE/MSE/IAE/ISE, tak by uniknąć fałszywych alarmów.</p>
+
+                <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                    <button onClick={() => setSelectedMetrics(metricsFiles)} style={{ background: '#333', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '4px', fontSize: '0.75rem', cursor: 'pointer' }}>Zaznacz wszystkie</button>
+                    <button onClick={() => setSelectedMetrics([])} style={{ background: '#333', color: '#fff', border: 'none', padding: '4px 10px', borderRadius: '4px', fontSize: '0.75rem', cursor: 'pointer' }}>Odznacz wszystkie</button>
+                </div>
+
+                <div style={{ flex: 1, overflowY: 'auto', background: '#141414', border: '1px solid #2a2a2a', borderRadius: '6px', padding: '10px' }}>
+                    {metricsFiles.length === 0 ? <p style={{ color: '#666', textAlign: 'center' }}>Brak plików w folderach robota.</p> : 
+                      metricsFiles.map(file => (
+                        <label key={file} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px', borderBottom: '1px solid #222', cursor: 'pointer', color: selectedMetrics.includes(file) ? '#fff' : '#666' }}>
+                          <input type="checkbox" checked={selectedMetrics.includes(file)} onChange={() => toggleMetricFile(file)} style={{ accentColor: '#9c27b0', width: '16px', height: '16px' }} />
+                          <span style={{ fontSize: '0.85rem' }}>{file.split('/').pop()}</span>
+                        </label>
+                      ))
+                    }
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '15px', marginTop: '20px' }}>
+                  <button onClick={() => setShowMetricsModal(false)} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid #555', color: '#fff', borderRadius: '4px', cursor: 'pointer' }}>Anuluj</button>
+                  <button 
+                    onClick={runMetricsCalibration} 
+                    disabled={isMetricsCalibrating || selectedMetrics.length === 0}
+                    style={{ padding: '8px 16px', background: '#9c27b0', border: 'none', color: '#fff', borderRadius: '4px', cursor: isMetricsCalibrating ? 'wait' : 'pointer', fontWeight: 'bold' }}
+                  >
+                    {isMetricsCalibrating ? 'Kalibracja w toku...' : 'Rozpocznij Kalibrację'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -483,3 +652,4 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
   );
   
 };
+

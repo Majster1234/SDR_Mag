@@ -11,8 +11,11 @@ from backend.config import BASE_DIR, DEFAULT_ROBOTS, ROOT_PATH
 import math
 import glob
 import json
-from typing import Optional, Dict, Any 
+from typing import Optional, Dict, Any, List 
 from backend.ml.ml_engine import ml_engine
+from fastapi.responses import StreamingResponse
+import uuid
+import json
 
 router = APIRouter()
 
@@ -36,25 +39,32 @@ class SaveAutoDiagReq(BaseModel):
     robot_name: str
     test_file_path: str
 
-class TrainModelRequest(BaseModel):
+class MLTrainReq(BaseModel):
     model_name: str
-    folder_path: str
+    robot_name: str
+    test_files: List[str]
     reference_path: str
     window_size: int
     step_size: int
-    algorithm: str = "Isolation Forest"
-    contamination: float = 0.03
+    algorithm: str
+    contamination: float
+    use_thermal: bool
+    auto_optimize: bool
 
 class TestModelReq(BaseModel):
     group_id: str
     axis: str
     test_file_path: str
     reference_file_path: str
+    robot_name: str
+    use_thermal: bool = True
 
 class CalibrationReq(BaseModel):
     robot_path: str
 CONFIG_FILE = os.path.join(ROOT_PATH, "robots_config.json")
 
+class ModelCommentReq(BaseModel):
+    comment: str
 
 @router.delete("/api/ml/models/{group_id}")
 def delete_ml_model(group_id: str):
@@ -85,6 +95,11 @@ def get_ml_sources():
             data_folders = [item] 
             test_files = []
             
+            # NOWE: Skanujemy pliki CSV leżące bezpośrednio w folderze robota
+            for root_file in os.listdir(item_path):
+                if root_file.lower().endswith('.csv'):
+                    test_files.append(f"{item}/{root_file}")
+            
             for sub in os.listdir(item_path):
                 sub_path = os.path.join(item_path, sub)
                 if os.path.isdir(sub_path) and sub not in ["Przebieg_referencyjny"]:
@@ -101,31 +116,79 @@ def get_ml_sources():
             })
     return {"sources": sources}
 
-@router.post("/api/ml/test")
-def test_ml_model(req: TestModelReq):
-    abs_test = os.path.join(BASE_DIR, req.test_file_path)
-    abs_ref = os.path.join(BASE_DIR, req.reference_file_path)
-    return ml_engine.evaluate_file(req.group_id, req.axis, abs_test, abs_ref)
+@router.patch("/api/ml/models/{group_id}/comment")
+def update_ml_model_comment(group_id: str, req: ModelCommentReq):
+    return ml_engine.update_model_comment(group_id, req.comment)
 
-@router.post("/api/ml/train")
-def train_robot_model(req: TrainModelRequest):
-    abs_folder = os.path.join(BASE_DIR, req.folder_path)
-    abs_reference = os.path.join(BASE_DIR, req.reference_path)
+@router.post("/api/ml/train/stream")
+def api_ml_train_stream(req: MLTrainReq):
+    job_id = str(uuid.uuid4())
     
-    result = ml_engine.train_windowed_models(
-        model_name=req.model_name,
-        training_folder_path=abs_folder,
-        reference_file_path=abs_reference,
-        window_size=req.window_size,
-        step_size=req.step_size,
-        contamination=req.contamination,
-        algorithm=req.algorithm
+    # DODANE ROOT_PATH: Teraz serwer na 100% znajdzie pliki na dysku!
+    abs_test_files = [os.path.join(ROOT_PATH, BASE_DIR, f) for f in req.test_files]
+    abs_ref_file = os.path.join(ROOT_PATH, BASE_DIR, req.reference_path)
+    
+    thermal_config = {}
+    if req.use_thermal:
+        configs = load_robot_configs()
+        robot_cfg = configs.get(req.robot_name, {})
+        thermal_config = robot_cfg.get("thermal_config", {})
+
+    def event_generator():
+        # Informujemy Frontend o ID uruchomionego zadania
+        yield json.dumps({"job_id": job_id, "status": "started", "message": "Nawiązano połączenie..."}) + "\n"
+        
+        # Wywołanie bezpośrednie generatora z silnika
+        for message in ml_engine.train_windowed_models_stream(
+            job_id=job_id,
+            model_name=req.model_name,
+            test_files=abs_test_files,
+            reference_file_path=abs_ref_file,
+            window_size=req.window_size,
+            step_size=req.step_size,
+            algorithm=req.algorithm,
+            contamination=req.contamination,
+            thermal_config=thermal_config,
+            auto_optimize=req.auto_optimize
+        ):
+            yield message
+
+    # Zwracamy media_type jako NDJSON (Newline Delimited JSON), ułatwia to czytanie w JS
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
+@router.post("/api/ml/test")
+def api_ml_test_file(req: TestModelReq):
+    """
+    Endpoint symulacji: przyjmuje żądanie z frontendu, buduje 
+    absolutne ścieżki i przekazuje do silnika ML celem oceny.
+    """
+    # Budujemy bezwzględne ścieżki z użyciem ROOT_PATH, aby uniknąć problemów z lokalizacją plików
+    abs_test_file = os.path.join(ROOT_PATH, BASE_DIR, req.test_file_path)
+    abs_ref_file = os.path.join(ROOT_PATH, BASE_DIR, req.reference_file_path)
+    thermal_config = {}
+    if req.use_thermal:
+        configs = load_robot_configs()
+        robot_cfg = configs.get(req.robot_name, {})
+        thermal_config = robot_cfg.get("thermal_config", {})
+        
+    # Przekazanie zadania do silnika
+    return ml_engine.evaluate_file(
+        group_id=req.group_id,
+        axis=req.axis,
+        test_file_path=abs_test_file,
+        reference_file_path=abs_ref_file,
+        thermal_config=thermal_config
     )
-    return result
 
 @router.get("/api/ml/registry")
-def get_ml_models_registry():
+def get_ml_registry():
+    """Zwraca pełny rejestr wytrenowanych modeli AI."""
     return ml_engine.get_registry()
+
+@router.post("/api/ml/train/cancel/{job_id}")
+def api_ml_train_cancel(job_id: str):
+    ml_engine.cancel_training(job_id)
+    return {"status": "success"}
 
 @router.post("/api/file/save-auto-diagnosis")
 def save_auto_diagnosis(req: SaveAutoDiagReq):
@@ -604,19 +667,20 @@ def run_diagnosis(req: DiagnoseReq):
             errors["IAE"][col] = float(np.sum(np.abs(err) * dt))
             errors["ISE"][col] = float(np.sum((err**2) * dt))
             
-            if diag_type == 'Wskaźniki':
-                exceeded_limits["MAE"][col] = bool(errors["MAE"][col] > safe_float(config.get("mae_threshold"), 0.5))
-                exceeded_limits["MSE"][col] = bool(errors["MSE"][col] > safe_float(config.get("mse_threshold"), 1.0))
-                exceeded_limits["IAE"][col] = bool(errors["IAE"][col] > safe_float(config.get("iae_threshold"), 50.0))
-                exceeded_limits["ISE"][col] = bool(errors["ISE"][col] > safe_float(config.get("ise_threshold"), 100.0))
-            else:
-                for ko in exceeded_limits: exceeded_limits[ko][col] = False
-
-            if diag_type == 'Odchylenia':
-                tuning_mode = config.get('tuning_mode', 'okno') 
-                dev_thr = safe_float(config.get('a_deviation_threshold' if is_a else 'cur_deviation_threshold'), 2.0)
-                deadband = safe_float(config.get('a_deadband_threshold' if is_a else 'cur_deadband_threshold'), 0.05)
+            # --- 1. WYLICZENIE MARGINESU BAZOWEGO (Tolerancji) ---
+            dev_thr = safe_float(config.get('a_deviation_threshold' if is_a else 'cur_deviation_threshold'), 2.0)
+            deadband = safe_float(config.get('a_deadband_threshold' if is_a else 'cur_deadband_threshold'), 0.05)
+            tuning_mode = config.get('tuning_mode', 'okno')
             
+            if diag_type == 'Odchylenie (offsetowe)':
+                off_thr = safe_float(config.get('a_offset_threshold' if is_a else 'cur_offset_threshold'), 0.1)
+                margin = np.full(min_len, off_thr, dtype=float)
+            elif diag_type == 'Statystyka':
+                k_sigma = safe_float(config.get("sigma_multiplier"), 3.0)
+                std_val = np.std(err)
+                margin = np.full(min_len, k_sigma * std_val, dtype=float)
+            else:
+                # Domyślnie dla 'Odchylenia' ORAZ 'Wskaźniki' (budujemy referencyjny tunel tolerancji)
                 if tuning_mode == 'srednia':
                     global_mean = np.abs(r_vals).mean()
                     base_margin = np.full(min_len, global_mean * (dev_thr / 100.0), dtype=float)
@@ -627,32 +691,41 @@ def run_diagnosis(req: DiagnoseReq):
                 else:
                     rolling_max = pd.Series(r_vals).abs().rolling(window=11, center=True, min_periods=1).max().values
                     margin = np.maximum(rolling_max * (dev_thr / 100.0), deadband)
+
+            # --- 2. EWALUACJA WSKAŹNIKÓW ---
+            if diag_type == 'Wskaźniki':
+                # Odczyt niezależnych mnożników dla osi A oraz Cur
+                mae_scalar = safe_float(config.get("a_mae_threshold" if is_a else "cur_mae_threshold"), 1.0)
+                mse_scalar = safe_float(config.get("a_mse_threshold" if is_a else "cur_mse_threshold"), 1.0)
+                iae_scalar = safe_float(config.get("a_iae_threshold" if is_a else "cur_iae_threshold"), 1.0)
+                ise_scalar = safe_float(config.get("a_ise_threshold" if is_a else "cur_ise_threshold"), 1.0)
                 
-            elif diag_type == 'Odchylenie (offsetowe)':
-                off_thr = safe_float(config.get('a_offset_threshold' if is_a else 'cur_offset_threshold'), 0.1)
-                margin = np.full(min_len, off_thr, dtype=float)
+                calc_limit_mae = float(np.mean(margin) * mae_scalar)
+                calc_limit_mse = float(np.mean(margin**2) * mse_scalar)
+                calc_limit_iae = float(np.sum(margin * dt) * iae_scalar)
+                calc_limit_ise = float(np.sum((margin**2) * dt) * ise_scalar)
                 
-            elif diag_type == 'Statystyka':
-                k = safe_float(config.get("sigma_multiplier"), 3.0)
-                std_val = np.std(err)
-                margin = np.full(min_len, k * std_val, dtype=float)
-                
-                calculated_stats[col] = {
-                    "sigma": float(std_val),
-                    "limit": float(k * std_val)
-                }
+                calculated_thresholds["MAE"][col] = max(calc_limit_mae, 0.0001)
+                calculated_thresholds["MSE"][col] = max(calc_limit_mse, 0.0001)
+                calculated_thresholds["IAE"][col] = max(calc_limit_iae, 0.0001)
+                calculated_thresholds["ISE"][col] = max(calc_limit_ise, 0.0001)
+
+                exceeded_limits["MAE"][col] = bool(errors["MAE"][col] > calculated_thresholds["MAE"][col])
+                exceeded_limits["MSE"][col] = bool(errors["MSE"][col] > calculated_thresholds["MSE"][col])
+                exceeded_limits["IAE"][col] = bool(errors["IAE"][col] > calculated_thresholds["IAE"][col])
+                exceeded_limits["ISE"][col] = bool(errors["ISE"][col] > calculated_thresholds["ISE"][col])
             else:
-                margin = np.zeros(min_len, dtype=float)
+                for k_metric in exceeded_limits:
+                    exceeded_limits[k_metric][col] = False
+                    calculated_thresholds[k_metric][col] = 0.0
                 
             # Limity graficzne dla wykresów pozostają nietknięte
             up_limit = r_vals + margin
             low_limit = r_vals - margin
             
             if diag_type in ['Odchylenia', 'Odchylenie (offsetowe)', 'Statystyka']:
-                # NOWA LOGIKA: Sprawdzamy awarie z kompensacją i bez niej
                 is_out = np.abs(err) > margin
                 violation_percents[col] = float(is_out.mean() * 100)
-                
                 is_out_raw = np.abs(err_raw) > margin
                 violation_percents_raw[col] = float(is_out_raw.mean() * 100)
             else:
@@ -679,10 +752,11 @@ def run_diagnosis(req: DiagnoseReq):
                 "LowerLimit": np.round(low_limit, 4),
                 "Roznica": np.round(err, 4),
                 "RoznicaRaw": np.round(err_raw, 4),
-                "DiffUpper": np.round(margin, 4),    # Dodatni margines na wykres różnic
+                "DiffUpper": np.round(margin, 4),
                 "DiffLower": np.round(-margin, 4)
             })
             chart_data[col] = temp_df.to_dict(orient='records')
+            
             # --- WYLICZANIE STATYSTYK SYGNAŁU (Do popupu we frontendzie) ---
             if "signalParams" not in statsData:
                 statsData["signalParams"] = {}
@@ -705,7 +779,8 @@ def run_diagnosis(req: DiagnoseReq):
                     "std": float(np.std(err))
                 }
             }
-            # ---------------------------------------------------------------
+        
+        # --- ZAKOŃCZENIE PĘTLI FOR ---
         
         is_failure = False
         worst_axis = ""
@@ -725,10 +800,10 @@ def run_diagnosis(req: DiagnoseReq):
                         worst_axis = col
                         max_error = errors[metric][col]
                         limit_val = calculated_thresholds[metric][col]
-                        failure_reason = f"{reason_prefix}: Przekroczono limit 3σ na osi {col} (Wartość: {round(max_error, 2)} > Limit: {round(limit_val, 2)})"
+                        failure_reason = f"{reason_prefix}: Przekroczono limit wskaźnika {metric} na osi {col} (Wartość: {round(max_error, 2)} > Dopuszczalna: {round(limit_val, 2)})"
                         break
                 if is_failure: break
-            if not is_failure: failure_reason = "Wszystkie wskaźniki w normie (poniżej progu 3σ)"
+            if not is_failure: failure_reason = "Wszystkie wskaźniki w normie (poniżej dopuszczalnego mnożnika błędu)"
         else:
             max_viol_thr = safe_float(config.get("max_violation_threshold"), 5.0)
             error_unit = "%"
@@ -1002,3 +1077,110 @@ def run_thermal_calibration(req: CalibrationReq):
         }
         
     return {"status": "success", "calibration": results}
+
+class MetricsCalibReq(BaseModel):
+    robot_name: str
+    test_files: List[str]
+
+@router.post("/api/metrics-calibration")
+def run_metrics_calibration(req: MetricsCalibReq):
+    configs = load_robot_configs()
+    config = configs.get(req.robot_name, {})
+
+    ref_dir = os.path.join(BASE_DIR, req.robot_name, "Przebieg_referencyjny")
+    ref_files = [f for f in os.listdir(ref_dir) if os.path.isfile(os.path.join(ref_dir, f))] if os.path.exists(ref_dir) else []
+    
+    if not ref_files:
+        return {"error": "Brak pliku referencyjnego w folderze maszyny."}
+        
+    ref_file_path = os.path.join(ref_dir, ref_files[0])
+    df_ref, ref_temps = load_robot_data(ref_file_path)
+    df_ref.columns = df_ref.columns.str.strip()
+
+    # Rozdzielenie minimów dla osi A i Prądów
+    max_scalars_a = {"MAE": 0.1, "MSE": 0.1, "IAE": 0.1, "ISE": 0.1}
+    max_scalars_cur = {"MAE": 0.1, "MSE": 0.1, "IAE": 0.1, "ISE": 0.1}
+    tuning_mode = config.get('tuning_mode', 'okno')
+
+    for test_file in req.test_files:
+        abs_test = os.path.join(BASE_DIR, test_file)
+        if not os.path.exists(abs_test): 
+            continue
+
+        df_test, test_temps = load_robot_data(abs_test)
+        df_test.columns = df_test.columns.str.strip()
+
+        min_len = min(len(df_ref), len(df_test))
+        df_r = df_ref.iloc[:min_len]
+        df_t = df_test.iloc[:min_len]
+
+        time_col = next((c for c in df_r.columns if 'time' in c.lower() or 'czas' in c.lower()), None)
+        if time_col:
+            times = (df_r[time_col].values - float(df_r[time_col].iloc[0])) / 1000.0
+            dt = np.diff(times, prepend=times[0])
+            dt[0] = 0.0
+        else:
+            times = np.arange(min_len, dtype=float)
+            dt = np.ones(min_len, dtype=float)
+            dt[0] = 0.0
+
+        cols = [c for c in df_r.columns if (c.startswith('A') and c not in ['Auto_Label', 'Label']) or c.startswith('Cur')]
+
+        for col in cols:
+            is_a = col.startswith('A')
+            r_vals = df_r[col].values
+            t_vals = df_t[col].values
+
+            k = 1.0
+            if not is_a:
+                axis_key = col.replace("Cur", "A")
+                thermal_config = config.get("thermal_config", {})
+                axis_thermal = thermal_config.get(axis_key, {})
+                a = axis_thermal.get("a", 0.0)
+                b = axis_thermal.get("b", 1.0)
+                t_test = test_temps.get(axis_key, 50.0) if test_temps else 50.0
+                t_test = max(1.0, t_test)
+                if a != 0.0 or b != 1.0:
+                    k = a * np.log(t_test) + b
+
+            err = (t_vals * k) - r_vals
+
+            mae = float(np.abs(err).mean())
+            mse = float((err**2).mean())
+            iae = float(np.sum(np.abs(err) * dt))
+            ise = float(np.sum((err**2) * dt))
+
+            dev_thr = safe_float(config.get('a_deviation_threshold' if is_a else 'cur_deviation_threshold'), 2.0)
+            deadband = safe_float(config.get('a_deadband_threshold' if is_a else 'cur_deadband_threshold'), 0.05)
+
+            if tuning_mode == 'srednia':
+                global_mean = np.abs(r_vals).mean()
+                base_margin = np.full(min_len, global_mean * (dev_thr / 100.0), dtype=float)
+                margin = np.maximum(base_margin, deadband)
+            elif tuning_mode == 'chwilowy':
+                base_margin = np.full(min_len, dev_thr, dtype=float)
+                margin = np.maximum(base_margin, deadband)
+            else:
+                rolling_max = pd.Series(r_vals).abs().rolling(window=11, center=True, min_periods=1).max().values
+                margin = np.maximum(rolling_max * (dev_thr / 100.0), deadband)
+
+            base_mae = float(np.mean(margin))
+            base_mse = float(np.mean(margin**2))
+            base_iae = float(np.sum(margin * dt))
+            base_ise = float(np.sum((margin**2) * dt))
+
+            if is_a:
+                if base_mae > 0: max_scalars_a["MAE"] = max(max_scalars_a["MAE"], mae / base_mae)
+                if base_mse > 0: max_scalars_a["MSE"] = max(max_scalars_a["MSE"], mse / base_mse)
+                if base_iae > 0: max_scalars_a["IAE"] = max(max_scalars_a["IAE"], iae / base_iae)
+                if base_ise > 0: max_scalars_a["ISE"] = max(max_scalars_a["ISE"], ise / base_ise)
+            else:
+                if base_mae > 0: max_scalars_cur["MAE"] = max(max_scalars_cur["MAE"], mae / base_mae)
+                if base_mse > 0: max_scalars_cur["MSE"] = max(max_scalars_cur["MSE"], mse / base_mse)
+                if base_iae > 0: max_scalars_cur["IAE"] = max(max_scalars_cur["IAE"], iae / base_iae)
+                if base_ise > 0: max_scalars_cur["ISE"] = max(max_scalars_cur["ISE"], ise / base_ise)
+
+    suggested_a = { k: round(v * 1.1, 1) for k, v in max_scalars_a.items() }
+    suggested_cur = { k: round(v * 1.1, 1) for k, v in max_scalars_cur.items() }
+
+    return {"status": "success", "suggested_thresholds_a": suggested_a, "suggested_thresholds_cur": suggested_cur}

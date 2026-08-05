@@ -11,14 +11,36 @@ type Metric = 'MAE' | 'MSE' | 'IAE' | 'ISE';
 const METRICS: Metric[] = ['MAE', 'MSE', 'IAE', 'ISE'];
 
 // --- MINI WYKRES DO WIDOKU WSPÓLNEGO ---
-const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMarker, violationAreas, violationPercent, isExpanded, onToggleExpand, showRawDiff, onMaximize }: any) => {
-  const getBadgeColor = () => {
-      if (violationPercent === 0) return '#4caf50';
-      if (violationPercent >= failureThreshold) return '#f44336';
-      return '#ff9800';
+const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMarker, violationAreas, violationPercent, isExpanded, onToggleExpand, showRawDiff, onMaximize, diagType, statsData }: any) => {
+  
+  // Dynamiczny Badge w zależności od wybranej strategii diagnostycznej
+  const getBadgeStatus = () => {
+      if (diagType === 'Wskaźniki' && statsData) {
+          const metrics = ['ISE', 'MSE', 'IAE', 'MAE'];
+          for (let m of metrics) {
+              if (statsData.exceededLimits?.[m]?.[title]) {
+                  const val = statsData.errors[m][title];
+                  return { text: `❌ ${m}: ${val.toFixed(2)}`, color: '#f44336' };
+              }
+          }
+          return { text: '✅ OK', color: '#4caf50' };
+      } else {
+          // Zabezpieczenie przed undefined
+          const val = Number(violationPercent) || 0;
+          const thr = Number(failureThreshold) || 5.0;
+          
+          if (val === 0) return { text: '✅ OK', color: '#4caf50' };
+          if (val >= thr) return { text: `❌ ${val.toFixed(1)}% błędów`, color: '#f44336' };
+          return { text: `⚠️ ${val.toFixed(1)}% błędów`, color: '#ff9800' };
+      }
   };
+
+  const badge = getBadgeStatus();
+
   return (
     <div style={{ background: '#141414', padding: '12px', borderRadius: '8px', border: '1px solid #2a2a2a', marginBottom: '12px', transition: 'all 0.3s ease' }}>
+      
+      {/* NAGŁÓWEK MINI-WYKRESU */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <h5 style={{ margin: 0, color: '#aaa', fontSize: '0.85rem' }}>{title} <span style={{ opacity: 0.5 }}>[{unit}]</span></h5>
@@ -42,8 +64,10 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
             {isExpanded ? '▲ Ukryj residua' : '▼ Widok różnicy'}
           </button>
         </div>
-        <span style={{ background: getBadgeColor(), color: '#fff', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' }}>
-          {violationPercent > 0 ? `${violationPercent.toFixed(1)}% błędów` : '✅ OK'}
+        
+        {/* WIDOCZNY ZNACZNIK STATUSU AWARII */}
+        <span style={{ background: badge.color, color: '#fff', padding: '3px 8px', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold', boxShadow: `0 0 8px ${badge.color}40` }}>
+          {badge.text}
         </span>
       </div>
       
@@ -104,7 +128,9 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
   return (
     prevProps.isExpanded === nextProps.isExpanded &&
     prevProps.showRawDiff === nextProps.showRawDiff &&
-    prevProps.data === nextProps.data
+    prevProps.data === nextProps.data &&
+    prevProps.diagType === nextProps.diagType &&
+    prevProps.statsData === nextProps.statsData
   );
 });
   
@@ -736,7 +762,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
             </div>
           </div>
                 
-          {/* --- TABELA WSKAŹNIKÓW (MAE, MSE...) --- */}
+{/* --- TABELA WSKAŹNIKÓW (MAE, MSE...) --- */}
           {combinedData.length > 0 && isFile && statsData && (
             <div style={{ marginBottom: '15px' }}>
               
@@ -782,13 +808,28 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           {/* PĘTLA DLA KĄTÓW (A1-A6) */}
                           {statsData.aCols.map((c: any) => { 
                               const val = statsData.errors[metric][c]; 
-                              const bgColor = getErrorColor(val, statsData.maxes.A[metric]); 
-                              const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.1)');
+                              const limit = statsData.calculatedThresholds?.[metric]?.[c] || 0;
                               const isExceeded = statsData.exceededLimits?.[metric]?.[c] || false;
+                              const isMetricsMode = diagnosis?.globalDiagnosis?.diagType === 'Wskaźniki';
+                              
+                              const diff = limit - val;
+                              const hoverText = isMetricsMode 
+                                ? (isExceeded ? `❌ Przekroczono limit o ${Math.abs(diff).toFixed(4)}` : `✅ Brakuje ${diff.toFixed(4)} do limitu`) 
+                                : '';
+
+                              const baseColor = getErrorColor(val, statsData.maxes.A[metric]); 
+                              // Wymuszenie ostrej czerwieni (Hue: 0) jeśli przekroczono limit, w przeciwnym razie użyj gradientu (do pomarańczu)
+                              const bgColor = isExceeded ? 'hsl(0, 90%, 55%)' : baseColor; 
+                              const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.15)');
+                              
                               return (
-                              <td key={c} style={{ padding: '4px', borderBottom: '1px solid #222', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #333' : 'none' }}>
-                                  <div style={{ background: `linear-gradient(180deg, #1a1a1a 0%, ${lightBg} 100%)`, borderBottom: `2px solid ${bgColor}`, padding: '4px', borderRadius: '4px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-                                    <span>{val.toFixed(4)}</span>{isExceeded && <span title="Przekroczono limit" style={{ cursor: 'help', fontSize: '0.9rem' }}>⚠️</span>}
+                              <td key={c} title={hoverText} style={{ padding: '4px', borderBottom: '1px solid #222', borderRight: c === statsData.aCols[statsData.aCols.length - 1] ? '1px solid #333' : 'none', cursor: isMetricsMode ? 'help' : 'default' }}>
+                                  <div style={{ background: `linear-gradient(180deg, #1a1a1a 0%, ${lightBg} 100%)`, borderBottom: `2px solid ${bgColor}`, padding: '4px', borderRadius: '4px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px', color: isExceeded ? '#f44336' : '#fff' }}>
+                                    <span style={{ fontWeight: isExceeded ? 'bold' : 'normal' }}>{val.toFixed(4)}</span>
+                                    {isMetricsMode && (
+                                      <span style={{ fontSize: '0.75rem', color: isExceeded ? '#f44336' : '#888', whiteSpace: 'nowrap' }}>/ {limit.toFixed(4)}</span>
+                                    )}
+                                    {isExceeded && <span style={{ fontSize: '0.9rem' }}>⚠️</span>}
                                   </div>
                               </td>
                               ); 
@@ -797,13 +838,27 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           {/* PĘTLA DLA PRĄDÓW (Cur1-Cur6) */}
                           {statsData.curCols.map((c: any) => { 
                               const val = statsData.errors[metric][c]; 
-                              const bgColor = getErrorColor(val, statsData.maxes.Cur[metric]); 
-                              const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.1)');
+                              const limit = statsData.calculatedThresholds?.[metric]?.[c] || 0;
                               const isExceeded = statsData.exceededLimits?.[metric]?.[c] || false;
+                              const isMetricsMode = diagnosis?.globalDiagnosis?.diagType === 'Wskaźniki';
+                              
+                              const diff = limit - val;
+                              const hoverText = isMetricsMode 
+                                ? (isExceeded ? `❌ Przekroczono limit o ${Math.abs(diff).toFixed(4)}` : `✅ Brakuje ${diff.toFixed(4)} do limitu`) 
+                                : '';
+
+                              const baseColor = getErrorColor(val, statsData.maxes.Cur[metric]); 
+                              const bgColor = isExceeded ? 'hsl(0, 90%, 55%)' : baseColor; 
+                              const lightBg = bgColor.replace('hsl', 'hsla').replace(')', ', 0.15)');
+                              
                               return (
-                              <td key={c} style={{ padding: '4px', borderBottom: '1px solid #222' }}>
-                                  <div style={{ background: `linear-gradient(180deg, #1a1a1a 0%, ${lightBg} 100%)`, borderBottom: `2px solid ${bgColor}`, padding: '4px', borderRadius: '4px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-                                    <span>{val.toFixed(4)}</span>{isExceeded && <span title="Przekroczono limit" style={{ cursor: 'help', fontSize: '0.9rem' }}>⚠️</span>}
+                              <td key={c} title={hoverText} style={{ padding: '4px', borderBottom: '1px solid #222', cursor: isMetricsMode ? 'help' : 'default' }}>
+                                  <div style={{ background: `linear-gradient(180deg, #1a1a1a 0%, ${lightBg} 100%)`, borderBottom: `2px solid ${bgColor}`, padding: '4px', borderRadius: '4px', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px', color: isExceeded ? '#f44336' : '#fff' }}>
+                                    <span style={{ fontWeight: isExceeded ? 'bold' : 'normal' }}>{val.toFixed(4)}</span>
+                                    {isMetricsMode && (
+                                      <span style={{ fontSize: '0.75rem', color: isExceeded ? '#f44336' : '#888', whiteSpace: 'nowrap' }}>/ {limit.toFixed(4)}</span>
+                                    )}
+                                    {isExceeded && <span style={{ fontSize: '0.9rem' }}>⚠️</span>}
                                   </div>
                               </td>
                               ); 
@@ -1052,33 +1107,58 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                     </button>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                    
+                    {/* KOLUMNA LEWA: OSIE KĄTOWE */}
                     <div>
                       <h4 style={{ color: '#00bcd4', textAlign: 'center', borderBottom: '1px solid #2a2a2a', paddingBottom: '8px', marginTop: 0 }}>Osie Kątowe (A)</h4>
                       {statsData?.aCols?.map((col: string) => (
                         <MiniAnalizaChart 
-                          key={col} title={col} unit="°" data={diagnosis?.chartData?.[col] || []} 
-                          failureThreshold={robotInfo?.config?.max_violation_threshold || 5.0} 
-                          showTimeMarker={showTimeMarker} violationAreas={diagnosis?.violationAreas?.[col]} 
-                          violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0}
-                          isExpanded={expandedResiduals.includes(col)}
-                          onToggleExpand={() => toggleSingle(col)}
-                          showRawDiff={showRawDiff} // <--- NAPRAWA: Zapewnienie dostępu do stanu
-                          onMaximize={() => handleMaximize(col)}
-                        />
-                      ))}
-                    </div>
-                    <div>
-                      <h4 style={{ color: '#ffeb3b', textAlign: 'center', borderBottom: '1px solid #2a2a2a', paddingBottom: '8px', marginTop: 0 }}>Prądy Silników (Cur)</h4>
-                      {statsData?.curCols?.map((col: string) => (
-                        <MiniAnalizaChart 
-                          key={col} title={col} unit="%" data={diagnosis?.chartData?.[col] || []} 
-                          failureThreshold={robotInfo?.config?.max_violation_threshold || 5.0} 
-                          showTimeMarker={showTimeMarker} violationAreas={diagnosis?.violationAreas?.[col]} 
+                          key={col} 
+                          title={col} 
+                          unit="°" 
+                          data={diagnosis?.chartData?.[col] || []} 
+                          
+                          /* Używamy limitu z symulacji (jeśli włączona) lub bazowego */
+                          failureThreshold={overrideConfig?.max_violation_threshold ?? diagnosis?.usedConfig?.max_violation_threshold ?? 5.0} 
+                          
+                          showTimeMarker={showTimeMarker} 
+                          violationAreas={diagnosis?.violationAreas?.[col]} 
                           violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0}
                           isExpanded={expandedResiduals.includes(col)}
                           onToggleExpand={() => toggleSingle(col)}
                           showRawDiff={showRawDiff}
-                          onMaximize={() => handleMaximize(col)} 
+                          onMaximize={() => handleMaximize(col)}
+                          
+                          /* KLUCZOWE: Wstrzyknięcie strategii i danych statystycznych */
+                          diagType={diagnosis?.globalDiagnosis?.diagType} 
+                          statsData={diagnosis?.statsData}                
+                        />
+                      ))}
+                    </div>
+
+                    {/* KOLUMNA PRAWA: PRĄDY SILNIKÓW */}
+                    <div>
+                      <h4 style={{ color: '#ffeb3b', textAlign: 'center', borderBottom: '1px solid #2a2a2a', paddingBottom: '8px', marginTop: 0 }}>Prądy Silników (Cur)</h4>
+                      {statsData?.curCols?.map((col: string) => (
+                        <MiniAnalizaChart 
+                          key={col} 
+                          title={col} 
+                          unit="%" 
+                          data={diagnosis?.chartData?.[col] || []} 
+                          
+                          failureThreshold={overrideConfig?.max_violation_threshold ?? diagnosis?.usedConfig?.max_violation_threshold ?? 5.0} 
+                          
+                          showTimeMarker={showTimeMarker} 
+                          violationAreas={diagnosis?.violationAreas?.[col]} 
+                          violationPercent={diagnosis?.statsData?.violationPercents?.[col] || 0}
+                          isExpanded={expandedResiduals.includes(col)}
+                          onToggleExpand={() => toggleSingle(col)}
+                          showRawDiff={showRawDiff}
+                          onMaximize={() => handleMaximize(col)}
+                          
+                          /* KLUCZOWE: Muszą być w OBU pętlach! */
+                          diagType={diagnosis?.globalDiagnosis?.diagType} 
+                          statsData={diagnosis?.statsData}                
                         />
                       ))}
                     </div>
@@ -1122,17 +1202,41 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                   <h2 style={{ margin: 0, color: '#2196f3', display: 'flex', alignItems: 'center', gap: '10px' }}>
                     ⛶ Szczegółowa analiza osi: {maximizedAxis} <span style={{opacity: 0.5, fontSize: '1rem'}}>[{unit}]</span>
                   </h2>
-                  {zoomRange && (
-                    <button onClick={() => setZoomRange(null)} style={{ padding: '6px 12px', background: 'rgba(233, 30, 99, 0.15)', color: '#e91e63', border: '1px solid rgba(233, 30, 99, 0.4)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}>
-                      ✕ Reset Zoom
-                    </button>
-                  )}
-                  <button 
-                    onClick={() => setShowRawDiff(!showRawDiff)} 
-                    style={{ background: showRawDiff ? 'rgba(255, 235, 59, 0.15)' : 'transparent', color: showRawDiff ? '#fff59d' : '#888', border: `1px solid ${showRawDiff ? '#fbc02d' : '#444'}`, borderRadius: '4px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer', transition: '0.2s', marginLeft: '20px' }}
-                  >
-                    👁️ {showRawDiff ? 'Ukryj surowy sygnał' : 'Pokaż surowy sygnał'}
-                  </button>
+                  
+                  {/* DYNAMICZNY ZNACZNIK STATUSU (WSKAŹNIKI I ODCHYLENIA) W MODALU */}
+                  {(() => {
+                    const diagType = diagnosis?.globalDiagnosis?.diagType;
+                    const stats = diagnosis?.statsData;
+                    const fThreshold = overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0;
+                    const vPercent = stats?.violationPercents?.[maximizedAxis || ''] || 0;
+
+                    let bText = '✅ Pracuje prawidłowo';
+                    let bColor = 'rgba(76, 175, 80, 0.2)';
+                    let bBorder = '#4caf50';
+
+                    if (diagType === 'Wskaźniki' && stats) {
+                        const metrics = ['ISE', 'MSE', 'IAE', 'MAE'];
+                        for (let m of metrics) {
+                            if (stats.exceededLimits?.[m]?.[maximizedAxis || '']) {
+                                const val = stats.errors[m][maximizedAxis || ''];
+                                const limit = stats.calculatedThresholds[m][maximizedAxis || ''];
+                                bText = `❌ Awaria (Przekroczono ${m}: ${val.toFixed(2)} > Limit: ${limit.toFixed(2)})`;
+                                bColor = 'rgba(244, 67, 54, 0.2)';
+                                bBorder = '#f44336';
+                                break;
+                            }
+                        }
+                    } else {
+                        if (vPercent >= fThreshold) { bText = `❌ Awaria (Błąd: ${vPercent.toFixed(1)}%)`; bColor = 'rgba(244, 67, 54, 0.2)'; bBorder = '#f44336'; }
+                        else if (vPercent > 0) { bText = `⚠️ Ostrzeżenie (Błąd: ${vPercent.toFixed(1)}%)`; bColor = 'rgba(255, 152, 0, 0.2)'; bBorder = '#ff9800'; }
+                    }
+
+                    return (
+                      <span style={{ background: bColor, color: bBorder, border: `1px solid ${bBorder}`, padding: '4px 10px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 'bold', marginLeft: '5px' }}>
+                        {bText}
+                      </span>
+                    );
+                  })()}
                   
                   {/* PRZENIESIONY PRZYCISK STATYSTYK */}
                   <button 
