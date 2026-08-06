@@ -502,6 +502,7 @@ export const ZarzadzanieAI = () => {
                       <option value="Isolation Forest">Isolation Forest (Drzewa Izolacji)</option>
                       <option value="One-Class SVM">One-Class SVM (Wektory Nośne)</option>
                       <option value="LOF">LOF (Gęstość Sąsiadów)</option>
+                      <option value="Autoencoder">Autoencoder(Głęboka Sieć Neuronowa)</option>
                     </select>
                   </label>
 

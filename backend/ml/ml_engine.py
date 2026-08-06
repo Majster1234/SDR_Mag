@@ -8,10 +8,52 @@ import uuid
 from sklearn.ensemble import IsolationForest
 from sklearn.svm import OneClassSVM
 from sklearn.neighbors import LocalOutlierFactor
+from sklearn.neural_network import MLPRegressor
 
 ML_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(ML_DIR, "models")
 REGISTRY_PATH = os.path.join(MODELS_DIR, "registry.json")
+
+
+class AutoencoderWrapper:
+    """
+    Wrapper zamieniający regresor wielowarstwowy w autoenkoder
+    kompatybilny ze standardem Scikit-Learn (predict zwraca 1 / -1).
+    """
+    def __init__(self, contamination=0.03, hidden_layer_sizes=(8, 2, 8), random_state=42):
+        self.contamination = contamination
+        # Architektura klepsydry: np. 4 wejścia -> 8 -> 2 (wąskie gardło) -> 8 -> 4 wyjścia
+        self.model = MLPRegressor(hidden_layer_sizes=hidden_layer_sizes, activation='relu', solver='adam', random_state=random_state, max_iter=1000)
+        self.threshold_ = 0.0
+
+    def fit(self, X):
+        X_arr = np.asarray(X)
+        # Uczymy sieć przewidywać samą siebie (X -> X)
+        self.model.fit(X_arr, X_arr)
+        
+        preds = self.model.predict(X_arr)
+        errors = np.mean((X_arr - preds) ** 2, axis=1) # Błąd rekonstrukcji (MSE)
+        
+        if self.contamination == "auto" or (isinstance(self.contamination, float) and self.contamination <= 0):
+            # Bezpieczny margines: średnia + 3 odchylenia standardowe
+            self.threshold_ = float(np.mean(errors) + 3 * np.std(errors))
+        else:
+            self.threshold_ = float(np.percentile(errors, 100 * (1 - float(self.contamination))))
+        return self
+
+    def predict(self, X):
+        X_arr = np.asarray(X)
+        preds = self.model.predict(X_arr)
+        errors = np.mean((X_arr - preds) ** 2, axis=1)
+        # Jeśli błąd rekonstrukcji przekracza próg -> Anomalia (-1)
+        return np.where(errors > self.threshold_, -1, 1)
+
+    def decision_function(self, X):
+        X_arr = np.asarray(X)
+        preds = self.model.predict(X_arr)
+        errors = np.mean((X_arr - preds) ** 2, axis=1)
+        # Zwracamy "pewność" algorytmu (im wyższy wynik tym zdrowiej)
+        return self.threshold_ - errors
 
 class MLEngine:
     def __init__(self):
@@ -195,6 +237,11 @@ class MLEngine:
                             c_lof = "auto" if c == "auto" else c
                             for n_neighbors in [10, 20]:
                                 models_to_test.append(LocalOutlierFactor(contamination=c_lof, novelty=True, n_neighbors=n_neighbors))
+                        elif algorithm == "Autoencoder":
+                            c_ae = "auto" if c == "auto" else c
+                            # Testujemy 3 architektury ukryte Autoenkodera
+                            for layers in [(4, 2, 4), (8, 4, 8), (12, 4, 12)]:
+                                models_to_test.append(AutoencoderWrapper(contamination=c_ae, hidden_layer_sizes=layers))
                         
                         for test_clf in models_to_test:
                             try:
@@ -233,6 +280,9 @@ class MLEngine:
                     elif algorithm == "LOF":
                         eff_contam = "auto" if contamination <= 0.01 else contamination
                         clf = LocalOutlierFactor(contamination=eff_contam, novelty=True, n_neighbors=20)
+                    elif algorithm == "Autoencoder":
+                        eff_contam = "auto" if contamination <= 0.01 else contamination
+                        clf = AutoencoderWrapper(contamination=eff_contam, hidden_layer_sizes=(8, 2, 8))
                     
                     clf.fit(X_train)
 
