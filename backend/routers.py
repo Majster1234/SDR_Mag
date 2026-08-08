@@ -671,6 +671,14 @@ def run_diagnosis(req: DiagnoseReq):
             errors["MSE"][col] = float((err**2).mean())
             errors["IAE"][col] = float(np.sum(np.abs(err) * dt))
             errors["ISE"][col] = float(np.sum((err**2) * dt))
+
+            # Całkowita energia pobrana w czasie przejazdu. Dla prądów
+            # wykorzystujemy wartości po kompensacji termicznej, tak samo jak
+            # w pozostałej części diagnozy.
+            energy_ref = float(np.sum(np.abs(r_vals) * dt))
+            energy_test = float(np.sum(np.abs(t_vals * k if not is_a else t_vals) * dt))
+            energy_diff_pct = ((energy_test - energy_ref) / energy_ref * 100.0) if energy_ref > 0 else 0.0
+            statsData.setdefault("energyDiff", {})[col] = energy_diff_pct
             
             # --- 1. WYLICZENIE MARGINESU BAZOWEGO (Tolerancji) ---
             dev_thr = safe_float(config.get('a_deviation_threshold' if is_a else 'cur_deviation_threshold'), 2.0)
@@ -809,6 +817,26 @@ def run_diagnosis(req: DiagnoseReq):
                         break
                 if is_failure: break
             if not is_failure: failure_reason = "Wszystkie wskaźniki w normie (poniżej dopuszczalnego mnożnika błędu)"
+        elif diag_type == "Zużycie Energii":
+            eng_thr = safe_float(config.get("energy_threshold"), 5.0)
+            error_unit = "%"
+            for col in cols:
+                if col.startswith("Cur"):
+                    # Spadek poboru energii nie sygnalizuje zatarcia ani degradacji.
+                    val = max(0.0, statsData.get("energyDiff", {}).get(col, 0.0))
+                    violation_percents[col] = float(val)
+                    violation_percents_raw[col] = 0.0
+                    if val > max_error:
+                        max_error = val
+                        worst_axis = col
+                else:
+                    violation_percents[col] = 0.0
+                    violation_percents_raw[col] = 0.0
+            is_failure = max_error >= eng_thr
+            if is_failure:
+                failure_reason = f"DEGRADACJA/ZATARCIE: Wzrost zużycia energii o {round(max_error, 2)}% na osi {worst_axis}"
+            else:
+                failure_reason = "Zużycie energii w normie"
         else:
             max_viol_thr = safe_float(config.get("max_violation_threshold"), 5.0)
             error_unit = "%"
@@ -853,6 +881,7 @@ def run_diagnosis(req: DiagnoseReq):
                 "maxes": maxes, 
                 "violationPercents": violation_percents,
                 "violationPercentsRaw": violation_percents_raw,
+                "energyDiff": statsData.get("energyDiff", {}),
                 "signalParams": statsData.get("signalParams", {}),
                 "calculatedStats": calculated_stats 
             },

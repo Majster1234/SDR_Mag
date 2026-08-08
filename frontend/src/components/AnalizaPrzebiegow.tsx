@@ -653,6 +653,9 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const violationPercent = diagnosis?.statsData?.violationPercents?.[selectedColumn] || 0;
 
   const activeConfig = overrideConfig || diagnosis?.usedConfig || {};
+  const activeFailureThreshold = activeConfig.diagnosis_type === 'Zużycie Energii'
+    ? (activeConfig.energy_threshold ?? 5.0)
+    : (activeConfig.max_violation_threshold ?? 5.0);
   const checkIfCompensated = (axisName: string) => {
     if (!axisName) return false;
     const axisKey = axisName.replace('Cur', 'A'); // Termika jest pod kluczami A1..A6
@@ -796,13 +799,18 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                         <span style={{ color: '#aaa', fontSize: '0.8rem' }}>Algorytm: </span>
                         {isSimulating ? (
                           <select value={activeCfg.diagnosis_type || 'Odchylenia'} onChange={(e) => updateOverride('diagnosis_type', e.target.value)} style={{ ...inputStyle, width: 'auto', flex: 1, borderColor: '#ff9800' }}>
-                            <option value="Odchylenia">Odchylenia (Tunel %)</option><option value="Odchylenie (offsetowe)">Odchylenia (Offset staly)</option><option value="Wskaźniki">Wskaźniki (MAE, ISE...)</option><option value="Statystyka">Statystyka (k-Sigma)</option>
+                            <option value="Odchylenia">Odchylenia (Tunel %)</option><option value="Odchylenie (offsetowe)">Odchylenia (Offset staly)</option><option value="Wskaźniki">Wskaźniki (MAE, ISE...)</option><option value="Statystyka">Statystyka (k-Sigma)</option><option value="Zużycie Energii">Zużycie Energii (Suma)</option>
                           </select>
                         ) : (<strong style={{ color: '#fff', fontSize: '0.85rem' }}>{activeCfg.diagnosis_type || 'Nieznany'}</strong>)}
                       </div>
 
                       {activeCfg.diagnosis_type === 'Statystyka' ? (
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...paramStyle }}><span>Mnożnik k-Sigma (σ):</span>{isSimulating ? <input type="number" step="0.1" value={activeCfg.sigma_multiplier ?? 3.0} onChange={e => updateOverride('sigma_multiplier', parseFloat(e.target.value))} style={inputStyle} /> : <strong>{activeCfg.sigma_multiplier} x</strong>}</div>
+                      ) : activeCfg.diagnosis_type === 'Zużycie Energii' ? (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', ...paramStyle }}>
+                          <span>Dopuszczalny wzrost energii (%):</span>
+                          {isSimulating ? <input type="number" min="0" step="0.1" value={activeCfg.energy_threshold ?? 5.0} onChange={e => updateOverride('energy_threshold', parseFloat(e.target.value))} style={inputStyle} /> : <strong>{activeCfg.energy_threshold ?? 5.0} %</strong>}
+                        </div>
                       ) : activeCfg.diagnosis_type === 'Wskaźniki' ? (
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '10px' }}>
                           {['mae', 'mse', 'iae', 'ise'].map(metric => (
@@ -1025,7 +1033,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                       </tr>
 
                       {availableColumns.map((colName) => {
-                        const activeThreshold = overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0;
+                        const activeThreshold = activeFailureThreshold;
                         return (
                           <tr key={colName}>
                             <td style={{ padding: '8px 10px', borderBottom: '1px solid #222', borderRight: '1px solid #333', background: '#1a1a1a', position: 'sticky', left: 0, zIndex: 1, color: '#aaa' }}>
@@ -1191,7 +1199,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           data={diagnosis?.chartData?.[col] || []} 
                           
                           /* Używamy limitu z symulacji (jeśli włączona) lub bazowego */
-                          failureThreshold={overrideConfig?.max_violation_threshold ?? diagnosis?.usedConfig?.max_violation_threshold ?? 5.0} 
+                          failureThreshold={activeFailureThreshold} 
                           
                           showTimeMarker={showTimeMarker} 
                           violationAreas={diagnosis?.violationAreas?.[col]} 
@@ -1219,7 +1227,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           unit="%" 
                           data={diagnosis?.chartData?.[col] || []} 
                           
-                          failureThreshold={overrideConfig?.max_violation_threshold ?? diagnosis?.usedConfig?.max_violation_threshold ?? 5.0} 
+                          failureThreshold={activeFailureThreshold} 
                           
                           showTimeMarker={showTimeMarker} 
                           violationAreas={diagnosis?.violationAreas?.[col]} 
@@ -1282,7 +1290,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                   {(() => {
                     const diagType = diagnosis?.globalDiagnosis?.diagType;
                     const stats = diagnosis?.statsData;
-                    const fThreshold = overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0;
+                    const fThreshold = activeFailureThreshold;
                     const vPercent = stats?.violationPercents?.[maximizedAxis || ''] || 0;
                     
 

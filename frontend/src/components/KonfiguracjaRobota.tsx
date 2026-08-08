@@ -18,6 +18,7 @@ const DIAGNOSIS_METHODS = [
   { id: 'Odchylenie (offsetowe)', label: 'Klasyczna: Odchylenia (Offset stały)' },
   { id: 'Wskaźniki', label: 'Klasyczna: Wskaźniki matematyczne (MAE, ISE...)' },
   { id: 'Statystyka', label: 'Klasyczna: Analiza Statystyczna (k-Sigma)' },
+  { id: 'Zużycie Energii', label: 'Klasyczna: Całkowite Zużycie Energii (%)' },
   { id: 'AI', label: 'Sztuczna Inteligencja: Detekcja Anomalii (ML)' }
 ];
 
@@ -55,6 +56,7 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
   const [curMseThresh, setCurMseThresh] = useState(1.0);
   const [curIaeThresh, setCurIaeThresh] = useState(1.0);
   const [curIseThresh, setCurIseThresh] = useState(1.0);
+  const [energyThreshold, setEnergyThreshold] = useState(5.0);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -214,6 +216,7 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
           setCurMseThresh(cfg.cur_mse_threshold ?? 1.0);
           setCurIaeThresh(cfg.cur_iae_threshold ?? 1.0);
           setCurIseThresh(cfg.cur_ise_threshold ?? 1.0);
+          setEnergyThreshold(cfg.energy_threshold ?? 5.0);
           setThermalConfig(cfg.thermal_config || {});
         }
       } catch (e) {
@@ -253,6 +256,7 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
       cur_mse_threshold: curMseThresh,
       cur_iae_threshold: curIaeThresh,
       cur_ise_threshold: curIseThresh,
+      energy_threshold: energyThreshold,
       thermal_config: thermalConfig,
     };
 
@@ -534,6 +538,16 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
                   <label style={labelStyle}>Stały offset kątowy (°)<input type="number" step="0.05" value={aOffset} onChange={e => setAOffset(Number(e.target.value))} style={inputStyle} /></label>
                   <label style={labelStyle}>Stały offset prądowy (%)<input type="number" step="0.5" value={curOffset} onChange={e => setCurOffset(Number(e.target.value))} style={inputStyle} /></label>
                 </div>
+              </div>
+            )}
+
+            {/* KONTROLER: ZUŻYCIE ENERGII */}
+            {diagnosisType === 'Zużycie Energii' && (
+              <div style={{ background: '#222', padding: '15px', borderRadius: '4px', maxWidth: '500px' }}>
+                <label style={labelStyle}>
+                  Dopuszczalny wzrost zużycia energii (%)
+                  <input type="number" min="0" step="0.1" value={energyThreshold} onChange={e => setEnergyThreshold(Number(e.target.value))} style={inputStyle} />
+                </label>
               </div>
             )}
 
