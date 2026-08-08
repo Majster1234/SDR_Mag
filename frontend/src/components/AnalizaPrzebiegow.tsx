@@ -477,6 +477,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const diffChartLineRef = useRef<HTMLDivElement>(null);
   const [overrideConfig, setOverrideConfig] = useState<any>(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [useThermal, setUseThermal] = useState(true);
   const [batchResults, setBatchResults] = useState<any[] | null>(null);
   const [isBatchLoading, setIsBatchLoading] = useState(false);
   const [batchTrendSelection, setBatchTrendSelection] = useState<string>('Ogólny');
@@ -501,13 +502,13 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
     setOverrideConfig((prev: any) => ({ ...(prev || diagnosis?.usedConfig || {}), [key]: value }));
   };
 
-  const handleRecalculate = async (configToUse = overrideConfig) => {
+  const handleRecalculate = async (configToUse = overrideConfig, thermalFlag = useThermal) => {
     setIsLoading(true);
     emitAppLog('info', 'Uruchomiono przeliczanie analizy z nowymi parametrami (Symulacja)...');
     try {
       const resDiag = await fetch('http://127.0.0.1:8000/api/diagnose', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ robot_name: robotName, test_file_path: selectedFilePath, override_config: configToUse })
+        body: JSON.stringify({ robot_name: robotName, test_file_path: selectedFilePath, override_config: configToUse, use_thermal: thermalFlag })
       });
       if (resDiag.ok) {
         const diagData = await resDiag.json();
@@ -533,7 +534,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
     try {
       const res = await fetch('http://127.0.0.1:8000/api/diagnose/batch', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ robot_name: robotName, folder_path: folderPath, override_config: overrideConfig })
+        body: JSON.stringify({ robot_name: robotName, folder_path: folderPath, override_config: overrideConfig, use_thermal: useThermal })
       });
       
       if (res.ok) {
@@ -599,7 +600,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
         const resTest = await fetch('http://127.0.0.1:8000/api/file-data', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: selectedFilePath }) });
         if (resTest.ok) setTestData(await resTest.json());
 
-        const resDiag = await fetch('http://127.0.0.1:8000/api/diagnose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ robot_name: robotName, test_file_path: selectedFilePath, override_config: overrideConfig }) });
+        const resDiag = await fetch('http://127.0.0.1:8000/api/diagnose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ robot_name: robotName, test_file_path: selectedFilePath, override_config: overrideConfig, use_thermal: useThermal }) });
         
         if (resDiag.ok) {
           const diagData = await resDiag.json();
@@ -767,6 +768,21 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                     style={{ background: isSimulating ? '#4caf50' : 'transparent', color: isSimulating ? '#fff' : '#2196f3', border: isSimulating ? 'none' : '1px solid #2196f3', borderRadius: '4px', padding: '4px 10px', fontSize: '0.75rem', cursor: 'pointer', fontWeight: 'bold' }}
                   >{isSimulating ? '▶ Przelicz zmiany' : '🔧 Modyfikuj parametry'}</button>
                 </div>
+              </div>
+
+              <div style={{ marginBottom: '15px', padding: '10px', background: 'rgba(255, 152, 0, 0.1)', border: `1px solid ${useThermal ? 'rgba(255, 152, 0, 0.4)' : '#333'}`, borderRadius: '6px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', color: useThermal ? '#ff9800' : '#888', fontSize: '0.85rem', cursor: 'pointer', fontWeight: 'bold' }}>
+                  <input
+                    type="checkbox"
+                    checked={useThermal}
+                    onChange={(e) => {
+                      setUseThermal(e.target.checked);
+                      handleRecalculate(overrideConfig, e.target.checked);
+                    }}
+                    style={{ accentColor: '#ff9800', width: '16px', height: '16px' }}
+                  />
+                  🌡️ Uwzględnij kompensację termiczną maszyny
+                </label>
               </div>
 
               {diagnosis?.usedConfig ? (

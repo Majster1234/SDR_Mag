@@ -523,6 +523,7 @@ class DiagnoseReq(BaseModel):
     robot_name: str
     test_file_path: str
     override_config: Optional[Dict[str, Any]] = None
+    use_thermal: bool = True
 
 def safe_float(val, default=0.0):
     try:
@@ -556,6 +557,10 @@ def run_diagnosis(req: DiagnoseReq):
     
     if req.override_config:
         config.update(req.override_config)
+
+    # Wyłącza termiczną korektę prądów na żądanie z interfejsu.
+    if not req.use_thermal:
+        config["thermal_config"] = {}
 
     ref_dir = os.path.join(BASE_DIR, req.robot_name, "Przebieg_referencyjny")
     ref_files = [f for f in os.listdir(ref_dir) if os.path.isfile(os.path.join(ref_dir, f))] if os.path.exists(ref_dir) else []
@@ -865,6 +870,7 @@ class BatchDiagnoseReq(BaseModel):
     robot_name: str
     folder_path: str
     override_config: Optional[Dict[str, Any]] = None
+    use_thermal: bool = True
 
 @router.post("/api/diagnose/batch")
 def run_batch_diagnosis(req: BatchDiagnoseReq):
@@ -892,7 +898,8 @@ def run_batch_diagnosis(req: BatchDiagnoseReq):
             single_req = DiagnoseReq(
                 robot_name=req.robot_name,
                 test_file_path=abs_path.replace("\\", "/"), 
-                override_config=req.override_config
+                override_config=req.override_config,
+                use_thermal=req.use_thermal
             )
             
             try:
