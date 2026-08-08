@@ -189,11 +189,13 @@ class MLEngine:
                             rmse = float(np.sqrt(np.mean(window ** 2)))
                             var = float(np.var(window))
                             ptp = float(np.max(window) - np.min(window))
-                            axes_dataset[col].append([mae, rmse, var, ptp])
+                            mean_val = float(np.mean(window))
+                            axes_dataset[col].append([mae, rmse, var, ptp, mean_val])
+                            
 
             group_id = f"group_{int(datetime.now().timestamp())}"
             trained_axes_list = []
-            feature_names = ["mae", "rmse", "var", "ptp"]
+            feature_names = ["mae", "rmse", "var", "ptp", "mean"]
 
 # 2. FAZA: TRENING MODELI (Zajmuje drugie 50% paska)
             for col, samples in axes_dataset.items():
@@ -433,6 +435,7 @@ class MLEngine:
             rmse_arr = np.full(min_len, np.nan)
             var_arr = np.full(min_len, np.nan)
             ptp_arr = np.full(min_len, np.nan)
+            mean_arr = np.full(min_len, np.nan)
             
             for i in range(0, min_len - window_size + 1, step_size):
                 window = residual[i : i + window_size]
@@ -442,6 +445,7 @@ class MLEngine:
                 rmse = float(np.sqrt(np.mean(window ** 2)))
                 var = float(np.var(window))
                 ptp = float(np.max(window) - np.min(window))
+                mean_val = float(np.mean(window))
                 
                 # Zapisujemy wartości dla danego przedziału kroku
                 end_idx = min(i + step_size, min_len)
@@ -449,8 +453,9 @@ class MLEngine:
                 rmse_arr[i:end_idx] = rmse
                 var_arr[i:end_idx] = var
                 ptp_arr[i:end_idx] = ptp
+                mean_arr[i:end_idx] = mean_val
                 
-                X_test = pd.DataFrame([[mae, rmse, var, ptp]], columns=feature_names)
+                X_test = pd.DataFrame([[mae, rmse, var, ptp, mean_val]], columns=feature_names)
                 prediction = model.predict(X_test)[0]
                 
                 if prediction == -1: 
@@ -461,6 +466,7 @@ class MLEngine:
             rmse_arr = pd.Series(rmse_arr).ffill().bfill().values
             var_arr = pd.Series(var_arr).ffill().bfill().values
             ptp_arr = pd.Series(ptp_arr).ffill().bfill().values
+            mean_arr = pd.Series(mean_arr).ffill().bfill().values
 
             # NOWOŚĆ: Skalowanie cech do 0-100% dla zunifikowanego wykresu
             def scale_to_100(arr):
@@ -473,6 +479,7 @@ class MLEngine:
             rmse_100 = scale_to_100(rmse_arr)
             var_100 = scale_to_100(var_arr)
             ptp_100 = scale_to_100(ptp_arr)
+            mean_100 = scale_to_100(np.abs(mean_arr))
                     
             chart_data = []
             for i in range(min_len):
@@ -487,11 +494,13 @@ class MLEngine:
                     "RMSE": round(float(rmse_arr[i]), 4),     
                     "VAR": round(float(var_arr[i]), 4),       
                     "PTP": round(float(ptp_arr[i]), 4),
+                    "MEAN": round(float(mean_arr[i]), 4),
                     # Wartości w % do narysowania linii
                     "MAE_100": round(float(mae_100[i]), 1),
                     "RMSE_100": round(float(rmse_100[i]), 1),
                     "VAR_100": round(float(var_100[i]), 1),
-                    "PTP_100": round(float(ptp_100[i]), 1)
+                    "PTP_100": round(float(ptp_100[i]), 1),
+                    "MEAN_100": round(float(mean_100[i]), 1)
                 })
                 
             violation_areas = []

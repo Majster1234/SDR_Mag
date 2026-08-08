@@ -26,7 +26,8 @@ const FEATURE_LABELS: Record<string, string> = {
   mae: 'Średni Uchyb (MAE)',
   rmse: 'Błąd Średniokwadratowy (RMSE)',
   var: 'Wariancja uchybu (VAR)',
-  ptp: 'Rozstęp (Peak-to-Peak)'
+  ptp: 'Rozstęp (Peak-to-Peak)',
+  mean: 'Średnia kierunkowa (MEAN)'
 };
 
 export const ZarzadzanieAI = () => {
@@ -964,6 +965,7 @@ export const ZarzadzanieAI = () => {
                               <Line type="step" dataKey={normalizeIndicators ? "RMSE_100" : "RMSE"} name="RMSE" stroke="#3f51b5" strokeWidth={2} dot={false} isAnimationActive={false} />
                               <Line type="step" dataKey={normalizeIndicators ? "VAR_100" : "VAR"} name="VAR" stroke="#ffeb3b" strokeWidth={2} dot={false} isAnimationActive={false} />
                               <Line type="step" dataKey={normalizeIndicators ? "PTP_100" : "PTP"} name="PTP" stroke="#009688" strokeWidth={2} dot={false} isAnimationActive={false} />
+                              <Line type="step" dataKey={normalizeIndicators ? "MEAN_100" : "MEAN"} name="MEAN" stroke="#e91e63" strokeWidth={2} dot={false} isAnimationActive={false} />
                             </LineChart>
                           </ResponsiveContainer>
                         </div>

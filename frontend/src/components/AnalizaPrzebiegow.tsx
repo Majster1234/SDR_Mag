@@ -1,6 +1,6 @@
 // AnalizaPrzebiegow.tsx
 import { useState, useEffect, useMemo, useRef, Fragment, memo } from 'react';
-import { LineChart, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea, ReferenceLine } from 'recharts';
+import { LineChart, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea } from 'recharts';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
@@ -10,8 +10,48 @@ import { emitAppLog } from './Notifications';
 type Metric = 'MAE' | 'MSE' | 'IAE' | 'ISE';
 const METRICS: Metric[] = ['MAE', 'MSE', 'IAE', 'ISE'];
 
+// Wspólna paleta i nazwy serii dla wszystkich wykresów modułu Analiza.
+const CHART_SERIES = {
+  reference: { name: 'Referencja', color: '#5f8f73', width: 2, dash: undefined },
+  tested: { name: 'Badany', color: '#6f9bb4', width: 2.5, dash: undefined },
+  raw: { name: 'Badany (surowy)', color: '#b28a55', width: 2, dash: '7 4' },
+  compensated: { name: 'Badany (po komp.)', color: '#6f9bb4', width: 2.5, dash: undefined },
+  diff: { name: 'Różnica', color: '#b06b78', width: 2.5, dash: undefined },
+  rawDiff: { name: 'Różnica (surowa)', color: '#8979a5', width: 2, dash: '7 4' },
+  upperLimit: { name: 'Granica górna', color: '#8f9aa5', width: 1.5, dash: '7 4' },
+  lowerLimit: { name: 'Granica dolna', color: '#5f6b76', width: 1.5, dash: '2 4' },
+  failureThreshold: { name: 'Próg awarii', color: '#a86161', width: 1.5, dash: '6 4' },
+  failureRate: { name: 'Awaryjność', color: '#6f9bb4', width: 2.5, dash: undefined },
+  rawFailureRate: { name: 'Awaryjność (surowa)', color: '#8979a5', width: 2, dash: '7 4' },
+  temperature: { name: 'Temperatura', color: '#b07a56', width: 2.5, dash: '2 3' },
+} as const;
+
+const COMPACT_LEGEND_STYLE = { fontSize: '9px', color: '#aaa' };
+const CHART_LEGEND_STYLE = { fontSize: '0.8rem', color: '#aaa' };
+
+const DiffChartTooltip = ({ active, payload, label, unit }: any) => {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div style={{ background: '#171b1b', border: '1px solid #3a4545', borderRadius: '6px', boxShadow: '0 6px 18px rgba(0, 0, 0, 0.35)', padding: '10px 12px', minWidth: '205px' }}>
+      <div style={{ color: '#c5cece', borderBottom: '1px solid #303b3b', paddingBottom: '6px', marginBottom: '6px', fontSize: '0.78rem', fontWeight: 600 }}>
+        Czas: {Number(label).toFixed(3)} s
+      </div>
+      {payload.filter((entry: any) => entry.value !== null && entry.value !== undefined).map((entry: any, index: number) => (
+        <div key={`${entry.dataKey}-${index}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', padding: '3px 0', color: '#d6dddd', fontSize: '0.78rem' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
+            <span style={{ width: '9px', height: '3px', borderRadius: '2px', background: entry.color || '#849090', display: 'inline-block' }} />
+            {entry.name || String(entry.dataKey)}
+          </span>
+          <strong style={{ color: '#f0f3f3', fontWeight: 600 }}>{Number(entry.value).toFixed(2)} {unit}</strong>
+        </div>
+      ))}
+    </div>
+  );
+};
+
 // --- MINI WYKRES DO WIDOKU WSPÓLNEGO ---
-const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMarker, violationAreas, violationPercent, isExpanded, onToggleExpand, showRawDiff, onMaximize, diagType, statsData }: any) => {
+const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMarker, violationAreas, violationPercent, isExpanded, onToggleExpand, showRawDiff, onMaximize, diagType, statsData, isCompensated }: any) => {
   
   // Dynamiczny Badge w zależności od wybranej strategii diagnostycznej
   const getBadgeStatus = () => {
@@ -72,7 +112,7 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
       </div>
       
       {/* GŁÓWNY WYKRES */}
-      <div style={{ height: '120px', position: 'relative' }}>
+      <div style={{ height: '140px', position: 'relative' }}>
         {showTimeMarker && (
           <div className="mini-sync-line" style={{ position: 'absolute', top: 5, bottom: 5, width: '2px', backgroundColor: '#2196f3', left: '40px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 5px rgba(33, 150, 243, 0.5)' }} />
         )}
@@ -82,10 +122,14 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
             <XAxis dataKey="Time" hide />
             <YAxis width={40} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 9}} tickFormatter={(v) => String(Math.round(v))} />
             <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} formatter={(v: any, name: any) => [Number(v).toFixed(2), String(name)]} />
+            <Legend verticalAlign="top" height={24} iconSize={6} wrapperStyle={COMPACT_LEGEND_STYLE} />
             {violationAreas && violationAreas.map((area: any, idx: number) => <ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />)}
-            <Line name="Referencja" type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-            <Line hide={!showRawDiff} name="Badany (Surowy)" type="monotone" dataKey="Badany" stroke="#ffeb3b" strokeWidth={1.5} strokeDasharray="2 2" dot={false} isAnimationActive={false} opacity={0.5} />
-            <Line name="Badany (Po komp.)" type="monotone" dataKey="BadanyKomp" stroke="#ffeb3b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+            <Line name={CHART_SERIES.reference.name} type="monotone" dataKey="Referencja" stroke={CHART_SERIES.reference.color} strokeWidth={CHART_SERIES.reference.width} dot={false} isAnimationActive={false} />
+            {showRawDiff && isCompensated && (
+              <Line name={CHART_SERIES.raw.name} type="monotone" dataKey="Badany" stroke={CHART_SERIES.raw.color} strokeWidth={CHART_SERIES.raw.width} strokeDasharray={CHART_SERIES.raw.dash} dot={false} isAnimationActive={false} opacity={0.8} />
+            )}
+            <Line name={isCompensated ? CHART_SERIES.compensated.name : CHART_SERIES.tested.name} type="monotone" dataKey="BadanyKomp" stroke={CHART_SERIES.tested.color} strokeWidth={CHART_SERIES.tested.width} dot={false} isAnimationActive={false} />
+            
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -100,7 +144,7 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
         borderTop: `1px dashed ${isExpanded ? '#333' : 'transparent'}`, 
         paddingTop: isExpanded ? '10px' : '0px' 
       }}>
-        <div style={{ height: '120px', position: 'relative' }}>
+        <div style={{ height: '140px', position: 'relative' }}>
           {showTimeMarker && (
             <div className="mini-sync-line" style={{ position: 'absolute', top: 0, bottom: 5, width: '2px', backgroundColor: '#2196f3', left: '40px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 5px rgba(33, 150, 243, 0.5)' }} />
           )}
@@ -109,14 +153,16 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
               <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
               <XAxis dataKey="Time" hide />
               <YAxis width={40} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 9}} tickFormatter={(v) => String(Math.round(v))} />
-              <Legend verticalAlign="top" height={24} iconSize={6} wrapperStyle={{ fontSize: '9px', color: '#888' }} />
+              <Legend verticalAlign="top" height={24} iconSize={6} wrapperStyle={COMPACT_LEGEND_STYLE} />
               <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} formatter={(v: any, name: any) => [Number(v).toFixed(2), String(name)]} />
               {violationAreas && violationAreas.map((area: any, idx: number) => <ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />)}
               
-              <Line name="Limit" type="stepAfter" dataKey="DiffUpper" stroke="#555" strokeDasharray="3 3" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
-              <Line name="Limit" type="stepAfter" dataKey="DiffLower" stroke="#555" strokeDasharray="3 3" dot={false} strokeOpacity={0.8} isAnimationActive={false} />
-              <Line hide={!showRawDiff} name="Δ Surowa (bez komp.)" type="monotone" dataKey="RoznicaRaw" stroke="#888" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
-              <Line name="Δ Odchylenie" type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+              <Line name={CHART_SERIES.upperLimit.name} type="stepAfter" dataKey="DiffUpper" stroke={CHART_SERIES.upperLimit.color} strokeWidth={CHART_SERIES.upperLimit.width} strokeDasharray={CHART_SERIES.upperLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
+              <Line name={CHART_SERIES.lowerLimit.name} type="stepAfter" dataKey="DiffLower" stroke={CHART_SERIES.lowerLimit.color} strokeWidth={CHART_SERIES.lowerLimit.width} strokeDasharray={CHART_SERIES.lowerLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
+              {showRawDiff && isCompensated && (
+                <Line name={CHART_SERIES.rawDiff.name} type="monotone" dataKey="RoznicaRaw" stroke={CHART_SERIES.rawDiff.color} strokeWidth={CHART_SERIES.rawDiff.width} strokeDasharray={CHART_SERIES.rawDiff.dash} dot={false} isAnimationActive={false} />
+              )}
+              <Line name={CHART_SERIES.diff.name} type="monotone" dataKey="Roznica" stroke={CHART_SERIES.diff.color} strokeWidth={CHART_SERIES.diff.width} dot={false} isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -124,13 +170,13 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
     </div>
   );
 }, (prevProps, nextProps) => {
-  // Magia React.memo - komponent przerysuje się TYLKO jeśli jego konkretne propsy się zmienią
   return (
     prevProps.isExpanded === nextProps.isExpanded &&
     prevProps.showRawDiff === nextProps.showRawDiff &&
     prevProps.data === nextProps.data &&
     prevProps.diagType === nextProps.diagType &&
-    prevProps.statsData === nextProps.statsData
+    prevProps.statsData === nextProps.statsData &&
+    prevProps.isCompensated === nextProps.isCompensated
   );
 });
   
@@ -605,6 +651,15 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const violationAreas = diagnosis?.violationAreas?.[selectedColumn] || [];
   const violationPercent = diagnosis?.statsData?.violationPercents?.[selectedColumn] || 0;
 
+  const activeConfig = overrideConfig || diagnosis?.usedConfig || {};
+  const checkIfCompensated = (axisName: string) => {
+    if (!axisName) return false;
+    const axisKey = axisName.replace('Cur', 'A'); // Termika jest pod kluczami A1..A6
+    const tConf = activeConfig.thermal_config?.[axisKey];
+    if (!tConf) return false;
+    return tConf.a !== 0 || tConf.b !== 1; // Zwraca true, jeśli współczynniki są inne niż domyślne
+  };
+
   const handleLiveScrub = (index: number) => {
       if (!combinedData || combinedData.length < 2) return;
       const percent = index / (combinedData.length - 1);
@@ -628,7 +683,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   };
 
   const unit = getUnit(selectedColumn);
-
+  const isCompMax = checkIfCompensated(maximizedAxis || '');
   return (
     <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', minHeight: '100%', width: '100%', minWidth: 0 }}>
       {/* --- NAGŁÓWEK --- */}
@@ -1064,13 +1119,14 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           <XAxis dataKey="name" stroke="#666" angle={-45} textAnchor="end" height={60} fontSize={10} />
                           <YAxis yAxisId="left" stroke="#666" fontSize={10} unit="%" />
                           {showBatchTemp && <YAxis yAxisId="right" orientation="right" stroke="#ff9800" fontSize={10} unit="°C" domain={['auto', 'auto']} />}
-                          
+                           
                           <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', fontSize: '0.85rem', borderRadius: '6px' }} />
-                          <ReferenceLine yAxisId="left" y={overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0} stroke="#f44336" strokeDasharray="3 3" />
+                          <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={CHART_LEGEND_STYLE} />
+                          <Line yAxisId="left" type="linear" name={CHART_SERIES.failureThreshold.name} dataKey={() => overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0} stroke={CHART_SERIES.failureThreshold.color} strokeWidth={CHART_SERIES.failureThreshold.width} strokeDasharray={CHART_SERIES.failureThreshold.dash} dot={false} activeDot={false} isAnimationActive={false} />
                           
-                          <Line yAxisId="left" type="monotone" name={batchTrendSelection === 'Ogólny' ? 'Średnia awarii' : batchTrendSelection} dataKey="wartosc" stroke="#2196f3" strokeWidth={2} dot={{ r: 3, fill: '#2196f3' }} activeDot={{ r: 6 }} />
-                          {showBatchRaw && <Line yAxisId="left" type="monotone" name="Surowe awarie (bez komp.)" dataKey="wartoscRaw" stroke="#9c27b0" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3, fill: '#9c27b0' }} activeDot={{ r: 6 }} />}
-                          {showBatchTemp && <Line yAxisId="right" type="monotone" name={`Temp. ${batchTempSelection}`} dataKey="temperatura" stroke="#ff9800" strokeWidth={2} dot={{ r: 3, fill: '#ff9800' }} activeDot={{ r: 6 }} />}
+                          <Line yAxisId="left" type="monotone" name={CHART_SERIES.failureRate.name} dataKey="wartosc" stroke={CHART_SERIES.failureRate.color} strokeWidth={CHART_SERIES.failureRate.width} dot={false} activeDot={false} />
+                          {showBatchRaw && <Line yAxisId="left" type="monotone" name={CHART_SERIES.rawFailureRate.name} dataKey="wartoscRaw" stroke={CHART_SERIES.rawFailureRate.color} strokeWidth={CHART_SERIES.rawFailureRate.width} strokeDasharray={CHART_SERIES.rawFailureRate.dash} dot={false} activeDot={false} />}
+                          {showBatchTemp && <Line yAxisId="right" type="monotone" name={CHART_SERIES.temperature.name} dataKey="temperatura" stroke={CHART_SERIES.temperature.color} strokeWidth={CHART_SERIES.temperature.width} strokeDasharray={CHART_SERIES.temperature.dash} dot={false} activeDot={false} />}
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
@@ -1131,7 +1187,8 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           
                           /* KLUCZOWE: Wstrzyknięcie strategii i danych statystycznych */
                           diagType={diagnosis?.globalDiagnosis?.diagType} 
-                          statsData={diagnosis?.statsData}                
+                          statsData={diagnosis?.statsData}              
+                          isCompensated={checkIfCompensated(col)}  
                         />
                       ))}
                     </div>
@@ -1171,11 +1228,13 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
         </div>
       ) : ( <div style={{ marginTop: '2rem', padding: '3rem', border: '2px dashed #2a2a2a', borderRadius: '12px', color: '#666', textAlign: 'center' }}>Wybierz robota z drzewka plików, aby załadować przebieg...</div> )}
   
-{/* ========================================================= */}
+      {/* ========================================================= */}
       {/* MODAL PEŁNOEKRANOWY (ZOOM DLA WIDOKU WSPÓLNEGO)             */}
       {/* ========================================================= */}
+      
       {maximizedAxis && (
         <>
+        
           {/* DEFINICJA PŁYNNYCH ANIMACJI CSS */}
           <style>
             {`
@@ -1209,6 +1268,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                     const stats = diagnosis?.statsData;
                     const fThreshold = overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0;
                     const vPercent = stats?.violationPercents?.[maximizedAxis || ''] || 0;
+                    
 
                     let bText = '✅ Pracuje prawidłowo';
                     let bColor = 'rgba(76, 175, 80, 0.2)';
@@ -1266,24 +1326,30 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           <YAxis width={62} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 11}} label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#555', fontSize: 12 }} />
                           <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#333', borderRadius: '6px' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => { 
                             const strName = String(name);
-                            if (strName === "Badany") return [`${Number(v).toFixed(2)} ${unit}`, 'Badany (Surowy)'];
-                            if (strName === "BadanyKomp") return [`${Number(v).toFixed(2)} ${unit}`, 'Badany (Po komp.)'];
+                            
+                            if (strName === "Badany") return [`${Number(v).toFixed(2)} ${unit}`, CHART_SERIES.raw.name];
+                            if (strName === "BadanyKomp") return [`${Number(v).toFixed(2)} ${unit}`, isCompMax ? CHART_SERIES.compensated.name : CHART_SERIES.tested.name];
                             if (Array.isArray(v)) return [`od ${v[0].toFixed(2)} do ${v[1].toFixed(2)} ${unit}`, name]; 
-                            return [`${Number(v).toFixed(2)} ${unit}`, name]; 
+                            return [`${Number(v).toFixed(2)} ${unit}`, name];
+                             
                           }} />
-                          <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={{ fontSize: '0.85rem', color: '#888' }} />
+                          <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={CHART_LEGEND_STYLE} />
                           {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.2} strokeOpacity={0} />))}
                           
-                          <Line name="Referencja" type="monotone" dataKey="Referencja" stroke="#4caf50" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                          <Line hide={!showRawDiff} name="Badany (Surowy przed komp.)" type="monotone" dataKey="Badany" stroke="#ffeb3b" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} opacity={0.5} />
-                          <Line name="Badany (Po komp.)" type="monotone" dataKey="BadanyKomp" stroke="#ffeb3b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                          <Line name={CHART_SERIES.reference.name} type="monotone" dataKey="Referencja" stroke={CHART_SERIES.reference.color} strokeWidth={CHART_SERIES.reference.width} dot={false} isAnimationActive={false} />
+                          
+                          {showRawDiff && isCompMax && (
+                            <Line name={CHART_SERIES.raw.name} type="monotone" dataKey="Badany" stroke={CHART_SERIES.raw.color} strokeWidth={CHART_SERIES.raw.width} strokeDasharray={CHART_SERIES.raw.dash} dot={false} isAnimationActive={false} opacity={0.8} />
+                          )}
+                          
+                          <Line name={isCompMax ? CHART_SERIES.compensated.name : CHART_SERIES.tested.name} type="monotone" dataKey="BadanyKomp" stroke={CHART_SERIES.tested.color} strokeWidth={CHART_SERIES.tested.width} dot={false} isAnimationActive={false} />
                           {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0} fill="#2196f3" fillOpacity={0.2} />}
                         </ComposedChart>
                      </ResponsiveContainer>
                    </div>
 
                    {/* 2. DOLNY WYKRES RÓŻNICOWY W MODALU */}
-                   <h3 style={{ color: '#ff5722', marginBottom: '0.5rem', borderBottom: '1px solid #333', paddingBottom: '5px', fontSize: '1rem' }}>Różnica sygnałów w powiększeniu</h3>
+                   <h3 style={{ color: CHART_SERIES.diff.color, marginBottom: '0.5rem', borderBottom: '1px solid #333', paddingBottom: '5px', fontSize: '1rem' }}>Różnica sygnałów w powiększeniu</h3>
                    <div style={{ height: '35vh', background: '#141414', padding: '1rem', borderRadius: '8px', border: '1px solid #2a2a2a', position: 'relative' }}>
                      {showTimeMarker && (
                         <div className="modal-sync-line" style={{ position: 'absolute', top: 15, bottom: 25, width: '2px', backgroundColor: '#2196f3', left: '90px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 8px rgba(33,150,243,0.5)' }} />
@@ -1293,18 +1359,17 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                           <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
                           <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#555" tick={{fontSize: 11}} label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#888', fontSize: 11 }} />
                           <YAxis width={62} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 11}} label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#555', fontSize: 12 }} />
-                          <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#333', borderRadius: '6px' }} labelFormatter={(l) => `Czas: ${Number(l).toFixed(3)}s`} formatter={(v: any, name: any) => {
-                            const strName = String(name);
-                            if (strName === "DiffUpper" || strName === "DiffLower") return [`${Number(v).toFixed(2)} ${unit}`, 'Limit tolerancji'];
-                            return [`${Number(v).toFixed(2)} ${unit}`, 'Δ Różnica'];
-                          }} />
+                          <Tooltip content={<DiffChartTooltip unit={unit} />} />
                           {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.2} strokeOpacity={0} />))}
                           
-                          <Line name="DiffUpper" type="stepAfter" dataKey="DiffUpper" stroke="#555" strokeDasharray="4 4" dot={false} strokeOpacity={0.8} isAnimationActive={false} legendType="none" />
-                          <Line name="DiffLower" type="stepAfter" dataKey="DiffLower" stroke="#555" strokeDasharray="4 4" dot={false} strokeOpacity={0.8} isAnimationActive={false} legendType="none" />
+                          <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={CHART_LEGEND_STYLE} />
+                          <Line name={CHART_SERIES.upperLimit.name} type="stepAfter" dataKey="DiffUpper" stroke={CHART_SERIES.upperLimit.color} strokeWidth={CHART_SERIES.upperLimit.width} strokeDasharray={CHART_SERIES.upperLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
+                          <Line name={CHART_SERIES.lowerLimit.name} type="stepAfter" dataKey="DiffLower" stroke={CHART_SERIES.lowerLimit.color} strokeWidth={CHART_SERIES.lowerLimit.width} strokeDasharray={CHART_SERIES.lowerLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
                           
-                          <Line hide={!showRawDiff} name="Δ Surowa (bez komp.)" type="monotone" dataKey="RoznicaRaw" stroke="#888" strokeWidth={1.5} strokeDasharray="3 3" dot={false} isAnimationActive={false} />
-                          <Line name="Δ Odchylenie (Po komp.)" type="monotone" dataKey="Roznica" stroke="#ff5722" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                          {showRawDiff && isCompMax && (
+                            <Line name={CHART_SERIES.rawDiff.name} type="monotone" dataKey="RoznicaRaw" stroke={CHART_SERIES.rawDiff.color} strokeWidth={CHART_SERIES.rawDiff.width} strokeDasharray={CHART_SERIES.rawDiff.dash} dot={false} isAnimationActive={false} />
+                          )}
+                          <Line name={CHART_SERIES.diff.name} type="monotone" dataKey="Roznica" stroke={CHART_SERIES.diff.color} strokeWidth={CHART_SERIES.diff.width} dot={false} isAnimationActive={false} />
                           {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0} fill="#2196f3" fillOpacity={0.2} />}
                         </LineChart>
                      </ResponsiveContainer>

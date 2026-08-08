@@ -352,15 +352,31 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
   return (
     <div style={{ textAlign: 'left', maxWidth: '1000px', margin: '0 auto', paddingBottom: '40px' }}>
       
-      {/* NAGŁÓWEK I WYBÓR ROBOTA */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', borderBottom: '1px solid #333', paddingBottom: '15px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-          <h2 style={{ color: '#fff', margin: 0, fontSize: '1.4rem' }}>⚙️ Konfiguracja Docelowa</h2>
-          
+{/* NAGŁÓWEK */}
+      <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid #333', paddingBottom: '10px' }}>
+        <h2 style={{ color: '#fff', margin: 0, fontSize: '1.6rem' }}>Konfiguracja Robota</h2>
+      </div>
+
+      {/* PANEL WYBORU MASZYNY I AKCJI */}
+      <div style={{ 
+        background: '#1a1a1a', 
+        padding: '20px', 
+        borderRadius: '8px', 
+        border: '1px solid #444', 
+        marginBottom: '30px', 
+        boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'flex-end',
+        flexWrap: 'wrap',
+        gap: '20px'
+      }}>
+        <div style={{ flex: 1, minWidth: '300px' }}>
+          <h3 style={{ color: '#00ccff', marginTop: 0, marginBottom: '12px', fontSize: '1.1rem' }}>Wybierz maszynę w systemie</h3>
           <select 
             value={selectedRobot} 
             onChange={(e) => setSelectedRobot(e.target.value)}
-            style={{ background: '#222', color: '#fff', border: '1px solid #555', padding: '8px 15px', borderRadius: '4px', fontSize: '1rem', fontWeight: 'bold', outline: 'none', cursor: 'pointer' }}
+            style={{ width: '100%', maxWidth: '400px', background: '#222', color: '#fff', border: '1px solid #555', padding: '10px 15px', borderRadius: '6px', fontSize: '1rem', fontWeight: 'bold', outline: 'none', cursor: 'pointer' }}
           >
             <option value="" disabled>-- Wybierz robota z floty --</option>
             {availableRobots.map(r => <option key={r} value={r}>{r}</option>)}
@@ -371,17 +387,38 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
           <button 
             onClick={runCalibration}
             disabled={isSaving || !selectedRobot || isLoading}
-            style={{ background: '#ff9800', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: '4px', cursor: (!selectedRobot) ? 'not-allowed' : 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '8px' }}
+            style={{ 
+              background: selectedRobot ? '#ff9800' : '#333', 
+              color: selectedRobot ? '#fff' : '#666', 
+              border: selectedRobot ? '1px solid #ff9800' : '1px solid #444', 
+              padding: '10px 20px', 
+              borderRadius: '6px', 
+              cursor: (!selectedRobot || isLoading || isSaving) ? 'not-allowed' : 'pointer', 
+              fontWeight: 'bold', 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '8px',
+              transition: 'all 0.2s ease-in-out'
+            }}
           >
-            <span>🌡️</span> Kreator Kompensacji
+             Kreator kompensacji temperaturowej
           </button>
           
           <button 
             onClick={handleSave} 
             disabled={isSaving || !selectedRobot || isLoading}
-            style={{ background: isSaving ? '#444' : '#2196f3', color: '#fff', border: 'none', padding: '8px 25px', borderRadius: '4px', fontWeight: 'bold', cursor: isSaving ? 'wait' : 'pointer', transition: 'background 0.2s' }}
+            style={{ 
+              background: selectedRobot ? (isSaving ? '#444' : '#2196f3') : '#333', 
+              color: selectedRobot ? '#fff' : '#666', 
+              border: selectedRobot ? (isSaving ? '1px solid #444' : '1px solid #2196f3') : '1px solid #444', 
+              padding: '10px 25px', 
+              borderRadius: '6px', 
+              fontWeight: 'bold', 
+              cursor: (!selectedRobot || isLoading) ? 'not-allowed' : (isSaving ? 'wait' : 'pointer'), 
+              transition: 'all 0.2s ease-in-out'
+            }}
           >
-            {isSaving ? 'Zapisywanie...' : '💾 Zapisz konfigurację'}
+            {isSaving ? 'Zapisywanie...' : '💾'}
           </button>
         </div>
       </div>
@@ -397,7 +434,7 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
           
           {/* SEKCJA 1: IDENTYFIKACJA */}
           <div style={sectionStyle}>
-            <h3 style={{ margin: '0 0 15px 0', color: '#2196f3', fontSize: '1.05rem' }}>Identyfikacja fizyczna</h3>
+            <h3 style={{ margin: '0 0 15px 0', color: '#2196f3', fontSize: '1.05rem' }}>Dane robota</h3>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '15px' }}>
               <label style={labelStyle}>
                 Nazwa Folderu (Identyfikator)
@@ -405,13 +442,13 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
                 {newFolderName !== selectedRobot && <span style={{ color: '#ff9800', fontSize: '0.7rem', fontWeight: 'normal' }}>⚠️ Uwaga: Zmiana wpłynie na strukturę katalogów na dysku.</span>}
               </label>
               <label style={labelStyle}>
-                Model KUKA
+                Model urządzenia
                 <select value={robotModel} onChange={e => setRobotModel(e.target.value)} style={inputStyle}>
                   {KUKA_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </label>
               <label style={labelStyle}>
-                Lokalizacja robota
+                Lokalizacja
                 <input type="text" value={location} onChange={e => setLocation(e.target.value)} placeholder="np. Hala główna" style={inputStyle} />
               </label>
             </div>
@@ -419,10 +456,10 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
 
           {/* SEKCJA 2: METODA I MODELE AI */}
           <div style={sectionStyle}>
-            <h3 style={{ margin: '0 0 15px 0', color: '#4caf50', fontSize: '1.05rem' }}>Domyślna Strategia Diagnostyczna</h3>
+            <h3 style={{ margin: '0 0 15px 0', color: '#4caf50', fontSize: '1.05rem' }}>Strategia Diagnostyczna</h3>
             
             <label style={{ ...labelStyle, marginBottom: '15px' }}>
-              Zarządca diagnozy (używany automatycznie m.in. przez analizę grupową)
+              Typ analizy
               <select value={diagnosisType} onChange={e => setDiagnosisType(e.target.value)} style={{ ...inputStyle, width: '100%', maxWidth: '400px' }}>
                 {DIAGNOSIS_METHODS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
               </select>
@@ -452,9 +489,9 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
                   <label style={labelStyle}>
                     Tryb obliczania marginesu
                     <select value={tuningMode} onChange={e => setTuningMode(e.target.value)} style={inputStyle}>
-                      <option value="okno">Lokalne Okno (Zalecane - Proporcjonalne)</option>
-                      <option value="srednia">Średnia globalna sygnału (Proporcjonalne)</option>
-                      <option value="chwilowy">Wartość chwilowa (Sztywne stopnie/%)</option>
+                      <option value="okno">Sposób okienkowy</option>
+                      <option value="srednia">Średnia globalna sygnału</option>
+                      <option value="chwilowy">Wartość chwilowa</option>
                     </select>
                   </label>
                   
@@ -470,7 +507,7 @@ export const KonfiguracjaRobota = ({ selectedFilePath }: { selectedFilePath: str
                   <label style={labelStyle}>
                     Tolerancja Prądu (Cur) 
                     <span style={{color: '#ffeb3b', fontSize: '0.75rem', marginLeft: '5px'}}>
-                      {tuningMode === 'chwilowy' ? '[Sztywne % prądu]' : '[% amplitudy ruchu]'}
+                      {tuningMode === 'chwilowy' ? '[Sztywne % prądu]' : '[% amplitudy prądu]'}
                     </span>
                     <input type="number" step="0.1" value={curDeviation} onChange={e => setCurDeviation(Number(e.target.value))} style={inputStyle} />
                   </label>
