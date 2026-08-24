@@ -510,12 +510,12 @@ export const ZarzadzanieAI = () => {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: '#222', padding: '15px', borderRadius: '6px', border: '1px solid #333' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', color: useThermalComp ? '#4caf50' : '#888' }}>
                       <input type="checkbox" checked={useThermalComp} onChange={e => setUseThermalComp(e.target.checked)} style={{ width: '18px', height: '18px', accentColor: '#4caf50' }} />
-                      <strong>🌡️ Zastosuj kompensację termiczną przed treningiem</strong>
+                      <strong>Zastosuj kompensację termiczną przed treningiem</strong>
                     </label>
 
                     <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', color: autoOptimize ? '#9c27b0' : '#888', marginTop: '10px' }}>
                       <input type="checkbox" checked={autoOptimize} onChange={e => setAutoOptimize(e.target.checked)} style={{ width: '18px', height: '18px', accentColor: '#9c27b0' }} />
-                      <strong>✨ AutoML: Automatycznie dobierz okno i zanieczyszczenie</strong>
+                      <strong>AutoML: Automatycznie dobierz okno i zanieczyszczenie</strong>
                     </label>
                   </div>
 

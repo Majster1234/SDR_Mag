@@ -2,6 +2,31 @@
     "active_model_id": null,
     "models": [
         {
+            "group_id": "group_1786486738",
+            "name": "test",
+            "algorithm": "Isolation Forest",
+            "contamination": 0.03,
+            "created_at": "2026-08-12 00:19:02",
+            "files_used_count": 4,
+            "window_size": 50,
+            "step_size": 10,
+            "axes_trained": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "Cur1",
+                "Cur2",
+                "Cur3",
+                "Cur4",
+                "Cur5",
+                "Cur6"
+            ],
+            "comment": ""
+        },
+        {
             "group_id": "group_1786206268",
             "name": "Auto_5cech",
             "algorithm": "Autoencoder",
@@ -24,7 +49,7 @@
                 "Cur5",
                 "Cur6"
             ],
-            "comment": ""
+            "comment": "Model uczony na dodatkowej liczbie cech"
         },
         {
             "group_id": "group_1786198172",

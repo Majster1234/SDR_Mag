@@ -9,7 +9,7 @@ import { ZarzadzanieAI } from './zarzadzanieAI';
 const MODULES = [
   { id: 'podglad_danych', icon: '📊', shortName: 'Eksplorator' },
   { id: 'analiza_przebiegow', icon: '📈', shortName: 'Analiza' },
-  { id: 'zarzadzanie_ai', icon: '🧠', shortName: 'Modele AI' },
+  { id: 'zarzadzanie_ai', icon: '🧠', shortName: 'Modele ML' },
   { id: 'konfiguracja', icon: '⚙️', shortName: 'Konfiguracja' }
 ];
 

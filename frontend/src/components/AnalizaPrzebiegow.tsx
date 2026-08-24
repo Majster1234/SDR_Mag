@@ -705,7 +705,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
             onMouseEnter={e => e.currentTarget.style.background = 'rgba(33, 150, 243, 0.25)'}
             onMouseLeave={e => e.currentTarget.style.background = 'rgba(33, 150, 243, 0.15)'}
           >
-            {isAutoDiagnosing ? '⏳ Analizowanie...' : '🧠 Wywołaj Auto-Diagnostykę'}
+            {isAutoDiagnosing ? '⏳ Analizowanie...' : 'Wywołaj Auto-Diagnostykę'}
           </button>
         )}
       </div>
@@ -718,7 +718,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
             
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div style={{ background: '#141414', padding: '15px', borderRadius: '8px', border: '1px solid #2a2a2a', borderLeft: '4px solid #00bcd4' }}>
-                <h4 style={{ margin: '0 0 8px 0', color: '#00bcd4', fontSize: '0.95rem' }}>🤖 Maszyna i Lokalizacja</h4>
+                <h4 style={{ margin: '0 0 8px 0', color: '#00bcd4', fontSize: '0.95rem' }}>Maszyna i Lokalizacja</h4>
                 <div style={{ display: 'flex', gap: '20px' }}>
                   <p style={{ margin: 0, color: '#aaa', fontSize: '0.85rem' }}>Model: <strong style={{ color: '#fff' }}>{robotInfo?.config?.model || 'Nieokreślony'}</strong></p>
                   <p style={{ margin: 0, color: '#aaa', fontSize: '0.85rem' }}>Lok.: <strong style={{ color: '#fff' }}>{robotInfo?.config?.location || 'Nieokreślona'}</strong></p>
@@ -757,7 +757,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
             <div style={{ background: '#141414', padding: '15px', borderRadius: '8px', border: overrideConfig ? '1px solid #ff9800' : '1px solid #2a2a2a', display: 'flex', flexDirection: 'column', transition: 'all 0.3s' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', borderBottom: '1px solid #2a2a2a', paddingBottom: '10px' }}>
                 <h4 style={{ margin: 0, color: overrideConfig ? '#ff9800' : '#888', fontSize: '0.95rem' }}>
-                  {overrideConfig ? '⚠️ Parametry Symulacji (What-If)' : '⚙️ Aktywne parametry diagnozy'}
+                  {overrideConfig ? '⚠️Parametry Symulacji' : 'Aktywne parametry diagnozy'}
                 </h4>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   {overrideConfig && (
@@ -784,7 +784,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                     }}
                     style={{ accentColor: '#ff9800', width: '16px', height: '16px' }}
                   />
-                  🌡️ Uwzględnij kompensację termiczną maszyny
+                  Uwzględnienie kompensacji termicznej maszyny
                 </label>
               </div>
 

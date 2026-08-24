@@ -677,8 +677,11 @@ def run_diagnosis(req: DiagnoseReq):
             # w pozostałej części diagnozy.
             energy_ref = float(np.sum(np.abs(r_vals) * dt))
             energy_test = float(np.sum(np.abs(t_vals * k if not is_a else t_vals) * dt))
+            energy_test_raw = float(np.sum(np.abs(t_vals) * dt))
             energy_diff_pct = ((energy_test - energy_ref) / energy_ref * 100.0) if energy_ref > 0 else 0.0
+            energy_diff_pct_raw = ((energy_test_raw - energy_ref) / energy_ref * 100.0) if energy_ref > 0 else 0.0
             statsData.setdefault("energyDiff", {})[col] = energy_diff_pct
+            statsData.setdefault("energyDiffRaw", {})[col] = energy_diff_pct_raw
             
             # --- 1. WYLICZENIE MARGINESU BAZOWEGO (Tolerancji) ---
             dev_thr = safe_float(config.get('a_deviation_threshold' if is_a else 'cur_deviation_threshold'), 2.0)
@@ -825,7 +828,8 @@ def run_diagnosis(req: DiagnoseReq):
                     # Spadek poboru energii nie sygnalizuje zatarcia ani degradacji.
                     val = max(0.0, statsData.get("energyDiff", {}).get(col, 0.0))
                     violation_percents[col] = float(val)
-                    violation_percents_raw[col] = 0.0
+                    val_raw = max(0.0, statsData.get("energyDiffRaw", {}).get(col, 0.0))
+                    violation_percents_raw[col] = float(val_raw)
                     if val > max_error:
                         max_error = val
                         worst_axis = col
@@ -882,6 +886,7 @@ def run_diagnosis(req: DiagnoseReq):
                 "violationPercents": violation_percents,
                 "violationPercentsRaw": violation_percents_raw,
                 "energyDiff": statsData.get("energyDiff", {}),
+                "energyDiffRaw": statsData.get("energyDiffRaw", {}),
                 "signalParams": statsData.get("signalParams", {}),
                 "calculatedStats": calculated_stats 
             },
