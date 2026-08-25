@@ -11,6 +11,7 @@ from backend.config import BASE_DIR, DEFAULT_ROBOTS, ROOT_PATH
 import math
 import glob
 import json
+import unicodedata
 from typing import Optional, Dict, Any, List 
 from backend.ml.ml_engine import ml_engine
 from fastapi.responses import StreamingResponse
@@ -531,6 +532,13 @@ def safe_float(val, default=0.0):
     except (ValueError, TypeError):
         return default
 
+def is_energy_diagnosis(diagnosis_type: Any) -> bool:
+    normalized_type = "".join(
+        char for char in unicodedata.normalize("NFD", str(diagnosis_type))
+        if not unicodedata.combining(char)
+    ).casefold()
+    return normalized_type == "zuzycie energii"
+
 @router.post("/api/file/set-status")
 def set_file_status(req: FileStatusReq):
     full_path = os.path.join(ROOT_PATH, req.path)
@@ -675,13 +683,22 @@ def run_diagnosis(req: DiagnoseReq):
             # Całkowita energia pobrana w czasie przejazdu. Dla prądów
             # wykorzystujemy wartości po kompensacji termicznej, tak samo jak
             # w pozostałej części diagnozy.
-            energy_ref = float(np.sum(np.abs(r_vals) * dt))
-            energy_test = float(np.sum(np.abs(t_vals * k if not is_a else t_vals) * dt))
+            energy_ref_curve = np.cumsum(np.abs(r_vals) * dt)
+            energy_test_curve = np.cumsum(np.abs(t_vals * k if not is_a else t_vals) * dt)
+            energy_ref = float(energy_ref_curve[-1]) if len(energy_ref_curve) else 0.0
+            energy_test = float(energy_test_curve[-1]) if len(energy_test_curve) else 0.0
             energy_test_raw = float(np.sum(np.abs(t_vals) * dt))
             energy_diff_pct = ((energy_test - energy_ref) / energy_ref * 100.0) if energy_ref > 0 else 0.0
             energy_diff_pct_raw = ((energy_test_raw - energy_ref) / energy_ref * 100.0) if energy_ref > 0 else 0.0
             statsData.setdefault("energyDiff", {})[col] = energy_diff_pct
             statsData.setdefault("energyDiffRaw", {})[col] = energy_diff_pct_raw
+            if not is_a:
+                statsData.setdefault("energyTotals", {})[col] = {
+                    "reference": energy_ref,
+                    "test": energy_test,
+                    "difference": energy_test - energy_ref,
+                    "differencePct": energy_diff_pct if energy_ref > 0 else None,
+                }
             
             # --- 1. WYLICZENIE MARGINESU BAZOWEGO (Tolerancji) ---
             dev_thr = safe_float(config.get('a_deviation_threshold' if is_a else 'cur_deviation_threshold'), 2.0)
@@ -759,7 +776,7 @@ def run_diagnosis(req: DiagnoseReq):
                     areas.append({"start": round(float(times[s]), 3), "end": round(float(times[e]), 3)})
             violation_areas[col] = areas
 
-            temp_df = pd.DataFrame({
+            chart_values = {
                 "Time": np.round(times, 3),
                 "Referencja": np.round(r_vals, 4),
                 "Badany": np.round(t_vals, 4),
@@ -770,7 +787,14 @@ def run_diagnosis(req: DiagnoseReq):
                 "RoznicaRaw": np.round(err_raw, 4),
                 "DiffUpper": np.round(margin, 4),
                 "DiffLower": np.round(-margin, 4)
-            })
+            }
+            if not is_a:
+                chart_values.update({
+                    "EnergyReference": np.round(energy_ref_curve, 4),
+                    "EnergyTest": np.round(energy_test_curve, 4),
+                })
+
+            temp_df = pd.DataFrame(chart_values)
             chart_data[col] = temp_df.to_dict(orient='records')
             
             # --- WYLICZANIE STATYSTYK SYGNAŁU (Do popupu we frontendzie) ---
@@ -820,7 +844,7 @@ def run_diagnosis(req: DiagnoseReq):
                         break
                 if is_failure: break
             if not is_failure: failure_reason = "Wszystkie wskaźniki w normie (poniżej dopuszczalnego mnożnika błędu)"
-        elif diag_type == "Zużycie Energii":
+        elif is_energy_diagnosis(diag_type):
             eng_thr = safe_float(config.get("energy_threshold"), 5.0)
             error_unit = "%"
             for col in cols:
@@ -887,6 +911,7 @@ def run_diagnosis(req: DiagnoseReq):
                 "violationPercentsRaw": violation_percents_raw,
                 "energyDiff": statsData.get("energyDiff", {}),
                 "energyDiffRaw": statsData.get("energyDiffRaw", {}),
+                "energyTotals": statsData.get("energyTotals", {}),
                 "signalParams": statsData.get("signalParams", {}),
                 "calculatedStats": calculated_stats 
             },

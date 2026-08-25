@@ -28,6 +28,41 @@ const CHART_SERIES = {
 
 const COMPACT_LEGEND_STYLE = { fontSize: '9px', color: '#aaa' };
 const CHART_LEGEND_STYLE = { fontSize: '0.8rem', color: '#aaa' };
+const ENERGY_UNIT = '∫%';
+
+const formatEnergyValue = (value: unknown) => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue.toFixed(2) : '—';
+};
+
+const isEnergyDiagnosis = (diagnosisType: unknown) => (
+  String(diagnosisType ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase() === 'zuzycie energii'
+);
+
+const buildEnergySeries = (data: any[]) => {
+  let referenceEnergy = 0;
+  let testEnergy = 0;
+
+  return data.map((point: any, index: number) => {
+    const previousTime = index > 0 ? Number(data[index - 1]?.Time) : Number(point.Time);
+    const currentTime = Number(point.Time);
+    const deltaTime = index > 0 && Number.isFinite(currentTime) && Number.isFinite(previousTime)
+      ? currentTime - previousTime
+      : 0;
+
+    referenceEnergy += Math.abs(Number(point.Referencja) || 0) * deltaTime;
+    testEnergy += Math.abs(Number(point.BadanyKomp) || 0) * deltaTime;
+
+    return {
+      ...point,
+      EnergyReference: Number.isFinite(Number(point.EnergyReference)) ? point.EnergyReference : referenceEnergy,
+      EnergyTest: Number.isFinite(Number(point.EnergyTest)) ? point.EnergyTest : testEnergy,
+    };
+  });
+};
 
 const DiffChartTooltip = ({ active, payload, label, unit }: any) => {
   if (!active || !payload?.length) return null;
@@ -76,6 +111,31 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
   };
 
   const badge = getBadgeStatus();
+  const isEnergyView = isEnergyDiagnosis(diagType) && title.startsWith('Cur');
+  const energyChartData = useMemo(
+    () => isEnergyView ? buildEnergySeries(data) : data,
+    [data, isEnergyView]
+  );
+  const fallbackEnergyPoint = energyChartData[energyChartData.length - 1];
+  const fallbackEnergyReference = Number(fallbackEnergyPoint?.EnergyReference);
+  const fallbackEnergyTest = Number(fallbackEnergyPoint?.EnergyTest);
+  const fallbackEnergyTotals = Number.isFinite(fallbackEnergyReference) && Number.isFinite(fallbackEnergyTest)
+    ? {
+        reference: fallbackEnergyReference,
+        test: fallbackEnergyTest,
+        difference: fallbackEnergyTest - fallbackEnergyReference,
+        differencePct: fallbackEnergyReference > 0 ? ((fallbackEnergyTest - fallbackEnergyReference) / fallbackEnergyReference) * 100 : null,
+      }
+    : null;
+  const energyTotals = isEnergyView ? (statsData?.energyTotals?.[title] || fallbackEnergyTotals) : null;
+  const energyDifference = Number(energyTotals?.difference);
+  const energyDifferencePct = energyTotals?.differencePct;
+  const energyDifferenceLabel = Number.isFinite(energyDifference)
+    ? `${energyDifference >= 0 ? '+' : ''}${formatEnergyValue(energyDifference)}`
+    : '—';
+  const energyDifferencePctLabel = typeof energyDifferencePct === 'number'
+    ? `${energyDifferencePct >= 0 ? '+' : ''}${formatEnergyValue(energyDifferencePct)}%`
+    : '—';
 
   return (
     <div style={{ background: '#141414', padding: '12px', borderRadius: '8px', border: '1px solid #2a2a2a', marginBottom: '12px', transition: 'all 0.3s ease' }}>
@@ -101,7 +161,9 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
             onMouseEnter={e => { e.currentTarget.style.color = '#fff'; e.currentTarget.style.borderColor = '#555'; }}
             onMouseLeave={e => { e.currentTarget.style.color = '#888'; e.currentTarget.style.borderColor = '#333'; }}
           >
-            {isExpanded ? '▲ Ukryj residua' : '▼ Widok różnicy'}
+            {isExpanded
+              ? (isEnergyView ? '▲ Ukryj energię' : '▲ Ukryj residua')
+              : (isEnergyView ? '▼ Widok energii' : '▼ Widok różnicy')}
           </button>
         </div>
         
@@ -136,7 +198,7 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
 
       {/* ROZWIJANY WYKRES RÓŻNIC (RESIDUA) */}
       <div style={{ 
-        maxHeight: isExpanded ? '150px' : '0px', 
+        maxHeight: isExpanded ? (isEnergyView ? '205px' : '150px') : '0px', 
         opacity: isExpanded ? 1 : 0, 
         overflow: 'hidden', 
         transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
@@ -144,26 +206,45 @@ const MiniAnalizaChart = memo(({ title, data, unit, failureThreshold, showTimeMa
         borderTop: `1px dashed ${isExpanded ? '#333' : 'transparent'}`, 
         paddingTop: isExpanded ? '10px' : '0px' 
       }}>
-        <div style={{ height: '140px', position: 'relative' }}>
-          {showTimeMarker && (
-            <div className="mini-sync-line" style={{ position: 'absolute', top: 0, bottom: 5, width: '2px', backgroundColor: '#2196f3', left: '40px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 5px rgba(33, 150, 243, 0.5)' }} />
+        <div style={{ height: isEnergyView ? '190px' : '140px', position: 'relative' }}>
+          {isEnergyView && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 10px', alignItems: 'center', minHeight: '32px', padding: '0 2px 4px', color: '#aaa', fontSize: '0.68rem' }}>
+              <span>Ref.: <strong style={{ color: CHART_SERIES.reference.color }}>{formatEnergyValue(energyTotals?.reference)} {ENERGY_UNIT}</strong></span>
+              <span>Badany: <strong style={{ color: CHART_SERIES.compensated.color }}>{formatEnergyValue(energyTotals?.test)} {ENERGY_UNIT}</strong></span>
+              <span>Δ: <strong style={{ color: energyDifference >= 0 ? '#ff9800' : '#4caf50' }}>{energyDifferenceLabel} {ENERGY_UNIT}</strong></span>
+              <span>({energyDifferencePctLabel})</span>
+            </div>
           )}
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
-              <XAxis dataKey="Time" hide />
-              <YAxis width={40} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 9}} tickFormatter={(v) => String(Math.round(v))} />
-              <Legend verticalAlign="top" height={24} iconSize={6} wrapperStyle={COMPACT_LEGEND_STYLE} />
-              <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} formatter={(v: any, name: any) => [Number(v).toFixed(2), String(name)]} />
-              {violationAreas && violationAreas.map((area: any, idx: number) => <ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />)}
-              
-              <Line name={CHART_SERIES.upperLimit.name} type="stepAfter" dataKey="DiffUpper" stroke={CHART_SERIES.upperLimit.color} strokeWidth={CHART_SERIES.upperLimit.width} strokeDasharray={CHART_SERIES.upperLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
-              <Line name={CHART_SERIES.lowerLimit.name} type="stepAfter" dataKey="DiffLower" stroke={CHART_SERIES.lowerLimit.color} strokeWidth={CHART_SERIES.lowerLimit.width} strokeDasharray={CHART_SERIES.lowerLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
-              {showRawDiff && isCompensated && (
-                <Line name={CHART_SERIES.rawDiff.name} type="monotone" dataKey="RoznicaRaw" stroke={CHART_SERIES.rawDiff.color} strokeWidth={CHART_SERIES.rawDiff.width} strokeDasharray={CHART_SERIES.rawDiff.dash} dot={false} isAnimationActive={false} />
-              )}
-              <Line name={CHART_SERIES.diff.name} type="monotone" dataKey="Roznica" stroke={CHART_SERIES.diff.color} strokeWidth={CHART_SERIES.diff.width} dot={false} isAnimationActive={false} />
-            </LineChart>
+          {showTimeMarker && (
+            <div className="mini-sync-line" style={{ position: 'absolute', top: isEnergyView ? 36 : 0, bottom: 5, width: '2px', backgroundColor: '#2196f3', left: '40px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 5px rgba(33, 150, 243, 0.5)' }} />
+          )}
+          <ResponsiveContainer width="100%" height={isEnergyView ? 154 : "100%"}>
+            {isEnergyView ? (
+              <LineChart data={energyChartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
+                <XAxis dataKey="Time" hide />
+                <YAxis width={40} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 9}} tickFormatter={(v) => String(Math.round(v))} />
+                <Legend verticalAlign="top" height={24} iconSize={6} wrapperStyle={COMPACT_LEGEND_STYLE} />
+                <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} formatter={(v: any, name: any) => [`${formatEnergyValue(v)} ${ENERGY_UNIT}`, String(name)]} />
+                <Line name={CHART_SERIES.reference.name} type="monotone" dataKey="EnergyReference" stroke={CHART_SERIES.reference.color} strokeWidth={CHART_SERIES.reference.width} dot={false} isAnimationActive={false} />
+                <Line name={CHART_SERIES.compensated.name} type="monotone" dataKey="EnergyTest" stroke={CHART_SERIES.compensated.color} strokeWidth={CHART_SERIES.compensated.width} dot={false} isAnimationActive={false} />
+              </LineChart>
+            ) : (
+              <LineChart data={data} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
+                <XAxis dataKey="Time" hide />
+                <YAxis width={40} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 9}} tickFormatter={(v) => String(Math.round(v))} />
+                <Legend verticalAlign="top" height={24} iconSize={6} wrapperStyle={COMPACT_LEGEND_STYLE} />
+                <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', fontSize: '10px', borderColor: '#333', borderRadius: '4px' }} formatter={(v: any, name: any) => [Number(v).toFixed(2), String(name)]} />
+                {violationAreas && violationAreas.map((area: any, idx: number) => <ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.25} strokeOpacity={0} />)}
+                <Line name={CHART_SERIES.upperLimit.name} type="stepAfter" dataKey="DiffUpper" stroke={CHART_SERIES.upperLimit.color} strokeWidth={CHART_SERIES.upperLimit.width} strokeDasharray={CHART_SERIES.upperLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
+                <Line name={CHART_SERIES.lowerLimit.name} type="stepAfter" dataKey="DiffLower" stroke={CHART_SERIES.lowerLimit.color} strokeWidth={CHART_SERIES.lowerLimit.width} strokeDasharray={CHART_SERIES.lowerLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
+                {showRawDiff && isCompensated && (
+                  <Line name={CHART_SERIES.rawDiff.name} type="monotone" dataKey="RoznicaRaw" stroke={CHART_SERIES.rawDiff.color} strokeWidth={CHART_SERIES.rawDiff.width} strokeDasharray={CHART_SERIES.rawDiff.dash} dot={false} isAnimationActive={false} />
+                )}
+                <Line name={CHART_SERIES.diff.name} type="monotone" dataKey="Roznica" stroke={CHART_SERIES.diff.color} strokeWidth={CHART_SERIES.diff.width} dot={false} isAnimationActive={false} />
+              </LineChart>
+            )}
           </ResponsiveContainer>
         </div>
       </div>
@@ -653,7 +734,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const violationPercent = diagnosis?.statsData?.violationPercents?.[selectedColumn] || 0;
 
   const activeConfig = overrideConfig || diagnosis?.usedConfig || {};
-  const activeFailureThreshold = activeConfig.diagnosis_type === 'Zużycie Energii'
+  const activeFailureThreshold = isEnergyDiagnosis(activeConfig.diagnosis_type)
     ? (activeConfig.energy_threshold ?? 5.0)
     : (activeConfig.max_violation_threshold ?? 5.0);
   const checkIfCompensated = (axisName: string) => {
@@ -688,6 +769,33 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
 
   const unit = getUnit(selectedColumn);
   const isCompMax = checkIfCompensated(maximizedAxis || '');
+  const isMaximizedEnergyView = isEnergyDiagnosis(diagnosis?.globalDiagnosis?.diagType) && (maximizedAxis?.startsWith('Cur') ?? false);
+  const modalEnergyData = useMemo(
+    () => isMaximizedEnergyView ? buildEnergySeries(displayedData) : displayedData,
+    [displayedData, isMaximizedEnergyView]
+  );
+  const modalEnergyLastPoint = modalEnergyData[modalEnergyData.length - 1];
+  const modalEnergyReference = Number(modalEnergyLastPoint?.EnergyReference);
+  const modalEnergyTest = Number(modalEnergyLastPoint?.EnergyTest);
+  const modalEnergyFallbackTotals = Number.isFinite(modalEnergyReference) && Number.isFinite(modalEnergyTest)
+    ? {
+        reference: modalEnergyReference,
+        test: modalEnergyTest,
+        difference: modalEnergyTest - modalEnergyReference,
+        differencePct: modalEnergyReference > 0 ? ((modalEnergyTest - modalEnergyReference) / modalEnergyReference) * 100 : null,
+      }
+    : null;
+  const modalEnergyTotals = isMaximizedEnergyView
+    ? (statsData?.energyTotals?.[maximizedAxis || ''] || modalEnergyFallbackTotals)
+    : null;
+  const modalEnergyDifference = Number(modalEnergyTotals?.difference);
+  const modalEnergyDifferenceLabel = Number.isFinite(modalEnergyDifference)
+    ? `${modalEnergyDifference >= 0 ? '+' : ''}${formatEnergyValue(modalEnergyDifference)}`
+    : '—';
+  const modalEnergyDifferencePct = modalEnergyTotals?.differencePct;
+  const modalEnergyDifferencePctLabel = typeof modalEnergyDifferencePct === 'number'
+    ? `${modalEnergyDifferencePct >= 0 ? '+' : ''}${formatEnergyValue(modalEnergyDifferencePct)}%`
+    : '—';
   return (
     <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', minHeight: '100%', width: '100%', minWidth: 0 }}>
       {/* --- NAGŁÓWEK --- */}
@@ -1167,6 +1275,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
             {(() => {
               const allCols = [...(statsData?.aCols || []), ...(statsData?.curCols || [])];
               const isAllExpanded = expandedResiduals.length > 0 && expandedResiduals.length === allCols.length;
+              const isEnergyDiagnosisMode = isEnergyDiagnosis(diagnosis?.globalDiagnosis?.diagType);
               
               const toggleAll = () => setExpandedResiduals(isAllExpanded ? [] : allCols);
               const toggleSingle = (col: string) => setExpandedResiduals(prev => prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]);
@@ -1174,12 +1283,14 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
               return (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginBottom: '10px' }}>
-                    <button 
-                      onClick={() => setShowRawDiff(!showRawDiff)} 
-                      style={{ background: showRawDiff ? 'rgba(156, 39, 176, 0.2)' : 'transparent', color: showRawDiff ? '#e1bee7' : '#888', border: `1px solid ${showRawDiff ? '#9c27b0' : '#444'}`, borderRadius: '4px', padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', transition: '0.2s' }}
-                    >
-                      👁️ {showRawDiff ? 'Ukryj surowe odchylenie' : 'Pokaż surowe odchylenie'}
-                    </button>
+                    {!isEnergyDiagnosisMode && (
+                      <button 
+                        onClick={() => setShowRawDiff(!showRawDiff)} 
+                        style={{ background: showRawDiff ? 'rgba(156, 39, 176, 0.2)' : 'transparent', color: showRawDiff ? '#e1bee7' : '#888', border: `1px solid ${showRawDiff ? '#9c27b0' : '#444'}`, borderRadius: '4px', padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', transition: '0.2s' }}
+                      >
+                        👁️ {showRawDiff ? 'Ukryj surowe odchylenie' : 'Pokaż surowe odchylenie'}
+                      </button>
+                    )}
                     <button 
                       onClick={toggleAll} 
                       style={{ background: 'rgba(33, 150, 243, 0.1)', color: '#2196f3', border: '1px solid rgba(33, 150, 243, 0.3)', borderRadius: '4px', padding: '6px 12px', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '6px', transition: '0.2s' }}
@@ -1374,29 +1485,50 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                    </div>
 
                    {/* 2. DOLNY WYKRES RÓŻNICOWY W MODALU */}
-                   <h3 style={{ color: CHART_SERIES.diff.color, marginBottom: '0.5rem', borderBottom: '1px solid #333', paddingBottom: '5px', fontSize: '1rem' }}>Różnica sygnałów w powiększeniu</h3>
+                   <h3 style={{ color: isMaximizedEnergyView ? CHART_SERIES.compensated.color : CHART_SERIES.diff.color, marginBottom: '0.5rem', borderBottom: '1px solid #333', paddingBottom: '5px', fontSize: '1rem' }}>
+                     {isMaximizedEnergyView ? `Skumulowana całka prądu [${ENERGY_UNIT}]` : 'Różnica sygnałów w powiększeniu'}
+                   </h3>
                    <div style={{ height: '35vh', background: '#141414', padding: '1rem', borderRadius: '8px', border: '1px solid #2a2a2a', position: 'relative' }}>
-                     {showTimeMarker && (
-                        <div className="modal-sync-line" style={{ position: 'absolute', top: 15, bottom: 25, width: '2px', backgroundColor: '#2196f3', left: '90px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 8px rgba(33,150,243,0.5)' }} />
+                     {isMaximizedEnergyView && (
+                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', alignItems: 'center', minHeight: '30px', padding: '0 4px', color: '#aaa', fontSize: '0.78rem' }}>
+                         <span>Ref.: <strong style={{ color: CHART_SERIES.reference.color }}>{formatEnergyValue(modalEnergyTotals?.reference)} {ENERGY_UNIT}</strong></span>
+                         <span>Badany: <strong style={{ color: CHART_SERIES.compensated.color }}>{formatEnergyValue(modalEnergyTotals?.test)} {ENERGY_UNIT}</strong></span>
+                         <span>Δ: <strong style={{ color: modalEnergyDifference >= 0 ? '#ff9800' : '#4caf50' }}>{modalEnergyDifferenceLabel} {ENERGY_UNIT}</strong></span>
+                         <span>({modalEnergyDifferencePctLabel})</span>
+                       </div>
                      )}
-                     <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={displayedData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
-                          <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
-                          <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#555" tick={{fontSize: 11}} label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#888', fontSize: 11 }} />
-                          <YAxis width={62} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 11}} label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#555', fontSize: 12 }} />
-                          <Tooltip content={<DiffChartTooltip unit={unit} />} />
-                          {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.2} strokeOpacity={0} />))}
-                          
-                          <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={CHART_LEGEND_STYLE} />
-                          <Line name={CHART_SERIES.upperLimit.name} type="stepAfter" dataKey="DiffUpper" stroke={CHART_SERIES.upperLimit.color} strokeWidth={CHART_SERIES.upperLimit.width} strokeDasharray={CHART_SERIES.upperLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
-                          <Line name={CHART_SERIES.lowerLimit.name} type="stepAfter" dataKey="DiffLower" stroke={CHART_SERIES.lowerLimit.color} strokeWidth={CHART_SERIES.lowerLimit.width} strokeDasharray={CHART_SERIES.lowerLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
-                          
-                          {showRawDiff && isCompMax && (
-                            <Line name={CHART_SERIES.rawDiff.name} type="monotone" dataKey="RoznicaRaw" stroke={CHART_SERIES.rawDiff.color} strokeWidth={CHART_SERIES.rawDiff.width} strokeDasharray={CHART_SERIES.rawDiff.dash} dot={false} isAnimationActive={false} />
-                          )}
-                          <Line name={CHART_SERIES.diff.name} type="monotone" dataKey="Roznica" stroke={CHART_SERIES.diff.color} strokeWidth={CHART_SERIES.diff.width} dot={false} isAnimationActive={false} />
-                          {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0} fill="#2196f3" fillOpacity={0.2} />}
-                        </LineChart>
+                     {showTimeMarker && (
+                        <div className="modal-sync-line" style={{ position: 'absolute', top: isMaximizedEnergyView ? 48 : 15, bottom: 25, width: '2px', backgroundColor: '#2196f3', left: '90px', zIndex: 100, pointerEvents: 'none', boxShadow: '0 0 8px rgba(33,150,243,0.5)' }} />
+                     )}
+                     <ResponsiveContainer width="100%" height={isMaximizedEnergyView ? "85%" : "100%"}>
+                        {isMaximizedEnergyView ? (
+                          <LineChart data={modalEnergyData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
+                            <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
+                            <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#555" tick={{fontSize: 11}} label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#888', fontSize: 11 }} />
+                            <YAxis width={62} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 11}} label={{ value: ENERGY_UNIT, angle: -90, position: 'insideLeft', fill: '#555', fontSize: 12 }} />
+                            <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', borderColor: '#333', borderRadius: '6px' }} labelFormatter={(label) => `Czas: ${Number(label).toFixed(3)}s`} formatter={(value: any, name: any) => [`${formatEnergyValue(value)} ${ENERGY_UNIT}`, String(name)]} />
+                            <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={CHART_LEGEND_STYLE} />
+                            <Line name={CHART_SERIES.reference.name} type="monotone" dataKey="EnergyReference" stroke={CHART_SERIES.reference.color} strokeWidth={CHART_SERIES.reference.width} dot={false} isAnimationActive={false} />
+                            <Line name={CHART_SERIES.compensated.name} type="monotone" dataKey="EnergyTest" stroke={CHART_SERIES.compensated.color} strokeWidth={CHART_SERIES.compensated.width} dot={false} isAnimationActive={false} />
+                            {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0} fill="#2196f3" fillOpacity={0.2} />}
+                          </LineChart>
+                        ) : (
+                          <LineChart data={displayedData} margin={{ top: 10, right: 10, left: 10, bottom: 20 }} onMouseDown={(e) => e && setRefAreaLeft(e.activeLabel as number)} onMouseMove={(e) => refAreaLeft && e && setRefAreaRight(e.activeLabel as number)} onMouseUp={handleZoom} style={{ userSelect: 'none', cursor: 'crosshair' }}>
+                            <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
+                            <XAxis dataKey="Time" type="number" domain={['dataMin', 'dataMax']} tickFormatter={(v) => v.toFixed(1) + 's'} stroke="#555" tick={{fontSize: 11}} label={{ value: 'Czas nagrania [s]', position: 'insideBottom', offset: -10, fill: '#888', fontSize: 11 }} />
+                            <YAxis width={62} domain={['auto', 'auto']} stroke="#555" tick={{fontSize: 11}} label={{ value: unit, angle: -90, position: 'insideLeft', fill: '#555', fontSize: 12 }} />
+                            <Tooltip content={<DiffChartTooltip unit={unit} />} />
+                            {violationAreas?.map((area: any, idx: any) => (<ReferenceArea key={`diff-violation-${idx}`} x1={area.start} x2={area.end} fill="#f44336" fillOpacity={0.2} strokeOpacity={0} />))}
+                            <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={CHART_LEGEND_STYLE} />
+                            <Line name={CHART_SERIES.upperLimit.name} type="stepAfter" dataKey="DiffUpper" stroke={CHART_SERIES.upperLimit.color} strokeWidth={CHART_SERIES.upperLimit.width} strokeDasharray={CHART_SERIES.upperLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
+                            <Line name={CHART_SERIES.lowerLimit.name} type="stepAfter" dataKey="DiffLower" stroke={CHART_SERIES.lowerLimit.color} strokeWidth={CHART_SERIES.lowerLimit.width} strokeDasharray={CHART_SERIES.lowerLimit.dash} dot={false} strokeOpacity={0.9} isAnimationActive={false} />
+                            {showRawDiff && isCompMax && (
+                              <Line name={CHART_SERIES.rawDiff.name} type="monotone" dataKey="RoznicaRaw" stroke={CHART_SERIES.rawDiff.color} strokeWidth={CHART_SERIES.rawDiff.width} strokeDasharray={CHART_SERIES.rawDiff.dash} dot={false} isAnimationActive={false} />
+                            )}
+                            <Line name={CHART_SERIES.diff.name} type="monotone" dataKey="Roznica" stroke={CHART_SERIES.diff.color} strokeWidth={CHART_SERIES.diff.width} dot={false} isAnimationActive={false} />
+                            {refAreaLeft !== null && refAreaRight !== null && <ReferenceArea x1={refAreaLeft} x2={refAreaRight} strokeOpacity={0} fill="#2196f3" fillOpacity={0.2} />}
+                          </LineChart>
+                        )}
                      </ResponsiveContainer>
                    </div>
                 </div>
