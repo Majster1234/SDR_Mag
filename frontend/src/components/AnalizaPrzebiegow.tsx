@@ -1,6 +1,6 @@
 // AnalizaPrzebiegow.tsx
 import { useState, useEffect, useMemo, useRef, Fragment, memo } from 'react';
-import { LineChart, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea } from 'recharts';
+import { LineChart, ComposedChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceArea, Brush } from 'recharts';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid } from '@react-three/drei';
@@ -566,6 +566,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const [showRawDiff, setShowRawDiff] = useState<boolean>(false); 
   const [showBatchRaw, setShowBatchRaw] = useState<boolean>(false);
   const [batchTempSelection, setBatchTempSelection] = useState<string>('Średnia');
+  const [isBatchTrendMaximized, setIsBatchTrendMaximized] = useState(false);
   const [expandedResiduals, setExpandedResiduals] = useState<string[]>([]);
   const [showStatsTable, setShowStatsTable] = useState<boolean>(true);
   const robotName = selectedFilePath ? selectedFilePath.split(/[/\\]/)[1] : '';
@@ -796,6 +797,49 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
   const modalEnergyDifferencePctLabel = typeof modalEnergyDifferencePct === 'number'
     ? `${modalEnergyDifferencePct >= 0 ? '+' : ''}${formatEnergyValue(modalEnergyDifferencePct)}%`
     : '—';
+  const batchTrendData = useMemo(() => {
+    if (!batchResults) return [];
+
+    return batchResults.map((result: any) => {
+      let value = 0;
+      let rawValue = 0;
+
+      if (batchTrendSelection === 'Ogólny') {
+        const values = Object.values(result.violation_percents || {}) as number[];
+        const nonZeroValues = values.filter(item => typeof item === 'number' && item > 0);
+        value = nonZeroValues.length > 0
+          ? nonZeroValues.reduce((sum, item) => sum + item, 0) / nonZeroValues.length
+          : 0;
+
+        const rawValues = Object.values(result.violation_percents_raw || {}) as number[];
+        const nonZeroRawValues = rawValues.filter(item => typeof item === 'number' && item > 0);
+        rawValue = nonZeroRawValues.length > 0
+          ? nonZeroRawValues.reduce((sum, item) => sum + item, 0) / nonZeroRawValues.length
+          : 0;
+      } else {
+        value = result.violation_percents?.[batchTrendSelection] || 0;
+        rawValue = result.violation_percents_raw?.[batchTrendSelection] || 0;
+      }
+
+      let temperature = 0;
+      if (result.test_temps && Object.keys(result.test_temps).length > 0) {
+        if (batchTempSelection === 'Średnia') {
+          const temperatures = Object.values(result.test_temps) as number[];
+          if (temperatures.length > 0) temperature = temperatures.reduce((sum, item) => sum + item, 0) / temperatures.length;
+        } else {
+          temperature = result.test_temps[batchTempSelection] || 0;
+        }
+      }
+
+      return {
+        name: result.file_name.replace('przejazd_', 'P').replace('.csv', ''),
+        fileName: result.file_name,
+        wartosc: Number(value.toFixed(2)),
+        wartoscRaw: Number(rawValue.toFixed(2)),
+        temperatura: Number(temperature.toFixed(1)),
+      };
+    });
+  }, [batchResults, batchTrendSelection, batchTempSelection]);
   return (
     <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', minHeight: '100%', width: '100%', minWidth: 0 }}>
       {/* --- NAGŁÓWEK --- */}
@@ -1174,6 +1218,13 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                     <h4 style={{ color: '#2196f3', margin: 0, fontSize: '0.95rem' }}>📈 Trend degradacji</h4>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                      <button
+                        onClick={() => setIsBatchTrendMaximized(true)}
+                        title="Powiększ trend degradacji"
+                        style={{ background: 'transparent', color: '#2196f3', border: '1px solid #24547a', borderRadius: '4px', padding: '4px 8px', fontSize: '0.9rem', cursor: 'pointer' }}
+                      >
+                        ⛶ Powiększ
+                      </button>
                       <label style={{ color: '#ff9800', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
                         <input type="checkbox" checked={showBatchTemp} onChange={e => setShowBatchTemp(e.target.checked)} style={{ accentColor: '#ff9800' }} />
                         Pokaż temperaturę
@@ -1211,41 +1262,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                   <div style={{ height: '250px', width: '100%' }}>
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart
-                        data={batchResults.map((res: any) => {
-                            let wartosc = 0;
-                            let wartoscRaw = 0; // NOWA ZMIENNA
-                            
-                            if (batchTrendSelection === 'Ogólny') {
-                              const violationValues = Object.values(res.violation_percents || {}) as number[];
-                              const nonZeroValues = violationValues.filter(v => typeof v === 'number' && v > 0);
-                              wartosc = nonZeroValues.length > 0 ? nonZeroValues.reduce((sum, val) => sum + val, 0) / nonZeroValues.length : 0;
-                              
-                              // WYLICZENIE ŚREDNIEJ SUROWEJ
-                              const violationValuesRaw = Object.values(res.violation_percents_raw || {}) as number[];
-                              const nonZeroValuesRaw = violationValuesRaw.filter(v => typeof v === 'number' && v > 0);
-                              wartoscRaw = nonZeroValuesRaw.length > 0 ? nonZeroValuesRaw.reduce((sum, val) => sum + val, 0) / nonZeroValuesRaw.length : 0;
-                            } else { 
-                              wartosc = res.violation_percents[batchTrendSelection] || 0; 
-                              wartoscRaw = res.violation_percents_raw?.[batchTrendSelection] || 0;
-                            }
-                            
-                            let tempVal = 0;
-                            if (res.test_temps && Object.keys(res.test_temps).length > 0) {
-                                if (batchTempSelection === 'Średnia') {
-                                    const vals = Object.values(res.test_temps) as number[];
-                                    if (vals.length > 0) tempVal = vals.reduce((sum, val) => sum + val, 0) / vals.length;
-                                } else {
-                                    tempVal = res.test_temps[batchTempSelection] || 0;
-                                }
-                            }
-
-                            return { 
-                              name: res.file_name.replace('przejazd_', 'P').replace('.csv', ''), 
-                              wartosc: parseFloat(wartosc.toFixed(2)),
-                              wartoscRaw: parseFloat(wartoscRaw.toFixed(2)), // WSTRZYKNIĘCIE DANYCH
-                              temperatura: parseFloat(tempVal.toFixed(1))
-                            };
-                          })}
+                        data={batchTrendData}
                           margin={{ top: 10, right: 10, left: 0, bottom: 20 }}
                         >
                           <CartesianGrid strokeDasharray="2 2" stroke="#222" vertical={false} />
@@ -1255,7 +1272,7 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
                            
                           <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #333', fontSize: '0.85rem', borderRadius: '6px' }} />
                           <Legend verticalAlign="top" height={36} iconSize={8} wrapperStyle={CHART_LEGEND_STYLE} />
-                          <Line yAxisId="left" type="linear" name={CHART_SERIES.failureThreshold.name} dataKey={() => overrideConfig?.max_violation_threshold || diagnosis?.usedConfig?.max_violation_threshold || 5.0} stroke={CHART_SERIES.failureThreshold.color} strokeWidth={CHART_SERIES.failureThreshold.width} strokeDasharray={CHART_SERIES.failureThreshold.dash} dot={false} activeDot={false} isAnimationActive={false} />
+                          <Line yAxisId="left" type="linear" name={CHART_SERIES.failureThreshold.name} dataKey={() => activeFailureThreshold} stroke={CHART_SERIES.failureThreshold.color} strokeWidth={CHART_SERIES.failureThreshold.width} strokeDasharray={CHART_SERIES.failureThreshold.dash} dot={false} activeDot={false} isAnimationActive={false} />
                           
                           <Line yAxisId="left" type="monotone" name={CHART_SERIES.failureRate.name} dataKey="wartosc" stroke={CHART_SERIES.failureRate.color} strokeWidth={CHART_SERIES.failureRate.width} dot={false} activeDot={false} />
                           {showBatchRaw && <Line yAxisId="left" type="monotone" name={CHART_SERIES.rawFailureRate.name} dataKey="wartoscRaw" stroke={CHART_SERIES.rawFailureRate.color} strokeWidth={CHART_SERIES.rawFailureRate.width} strokeDasharray={CHART_SERIES.rawFailureRate.dash} dot={false} activeDot={false} />}
@@ -1613,6 +1630,60 @@ export const AnalizaPrzebiegow = ({ selectedFilePath }: { selectedFilePath: stri
               </div>
               
         </>
+      )}
+      {isBatchTrendMaximized && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.86)', zIndex: 5000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3vh 3vw', boxSizing: 'border-box', backdropFilter: 'blur(6px)' }}>
+          <div style={{ width: '100%', maxWidth: '1600px', height: '90vh', background: '#111', border: '1px solid #3a3a3a', borderRadius: '12px', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0, 0, 0, 0.8)' }}>
+            <div style={{ padding: '16px 22px', background: '#1a1a1a', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <h2 style={{ margin: 0, color: '#2196f3', fontSize: '1.3rem' }}>📈 Trend degradacji — widok szczegółowy</h2>
+                <span style={{ color: '#888', fontSize: '0.82rem' }}>Sygnał: {batchTrendSelection} · {batchTrendData.length} przejazdów</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', gap: '10px 16px', margin: '0 20px' }}>
+                <label style={{ color: '#ff9800', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={showBatchTemp} onChange={event => setShowBatchTemp(event.target.checked)} style={{ accentColor: '#ff9800' }} />
+                  Temperatura
+                </label>
+                <label style={{ color: '#9c27b0', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={showBatchRaw} onChange={event => setShowBatchRaw(event.target.checked)} style={{ accentColor: '#9c27b0' }} />
+                  Przebieg surowy
+                </label>
+                {showBatchTemp && (
+                  <select value={batchTempSelection} onChange={event => setBatchTempSelection(event.target.value)} style={{ background: '#111', color: '#ff9800', border: '1px solid #444', padding: '5px 8px', borderRadius: '4px', outline: 'none', fontSize: '0.82rem' }}>
+                    <option value="Średnia">∑ Średnia temp.</option>
+                    <option value="A1">A1</option><option value="A2">A2</option><option value="A3">A3</option>
+                    <option value="A4">A4</option><option value="A5">A5</option><option value="A6">A6</option>
+                  </select>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                  <span style={{ color: '#888', fontSize: '0.82rem' }}>Sygnał:</span>
+                  <select value={batchTrendSelection} onChange={event => setBatchTrendSelection(event.target.value)} style={{ background: '#111', color: '#fff', border: '1px solid #444', padding: '5px 8px', borderRadius: '4px', outline: 'none', fontSize: '0.82rem' }}>
+                    <option value="Ogólny">∑ Trend ogólny</option>
+                    {availableColumns.map(column => <option key={column} value={column}>{column}</option>)}
+                  </select>
+                </div>
+              </div>
+              <button onClick={() => setIsBatchTrendMaximized(false)} title="Zamknij widok szczegółowy" style={{ background: 'transparent', border: 'none', color: '#aaa', fontSize: '2rem', lineHeight: 1, cursor: 'pointer' }} onMouseEnter={e => e.currentTarget.style.color = '#fff'} onMouseLeave={e => e.currentTarget.style.color = '#aaa'}>×</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, padding: '24px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={batchTrendData} margin={{ top: 20, right: 35, left: 15, bottom: 75 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#282828" vertical={false} />
+                  <XAxis dataKey="name" stroke="#888" angle={-38} textAnchor="end" height={80} fontSize={12} label={{ value: 'Kolejne przejazdy', position: 'insideBottom', offset: -58, fill: '#aaa', fontSize: 12 }} />
+                  <YAxis yAxisId="left" stroke="#7f8fa6" fontSize={12} unit="%" label={{ value: 'Poziom odchylenia', angle: -90, position: 'insideLeft', fill: '#aaa', fontSize: 12 }} />
+                  {showBatchTemp && <YAxis yAxisId="right" orientation="right" stroke="#ff9800" fontSize={12} unit="°C" domain={['auto', 'auto']} label={{ value: 'Temperatura', angle: 90, position: 'insideRight', fill: '#ff9800', fontSize: 12 }} />}
+                  <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #444', borderRadius: '6px', fontSize: '0.9rem' }} labelFormatter={(label) => `Przejazd: ${label}`} formatter={(value: any, name: any) => [`${Number(value).toFixed(2)}${String(name).includes('Temperatura') ? ' °C' : ' %'}`, String(name)]} />
+                  <Legend verticalAlign="top" height={42} iconSize={9} wrapperStyle={CHART_LEGEND_STYLE} />
+                  <Line yAxisId="left" type="linear" name={CHART_SERIES.failureThreshold.name} dataKey={() => activeFailureThreshold} stroke={CHART_SERIES.failureThreshold.color} strokeWidth={CHART_SERIES.failureThreshold.width} strokeDasharray={CHART_SERIES.failureThreshold.dash} dot={false} activeDot={false} isAnimationActive={false} />
+                  <Line yAxisId="left" type="monotone" name={CHART_SERIES.failureRate.name} dataKey="wartosc" stroke={CHART_SERIES.failureRate.color} strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 7 }} />
+                  {showBatchRaw && <Line yAxisId="left" type="monotone" name={CHART_SERIES.rawFailureRate.name} dataKey="wartoscRaw" stroke={CHART_SERIES.rawFailureRate.color} strokeWidth={2} strokeDasharray={CHART_SERIES.rawFailureRate.dash} dot={{ r: 3 }} activeDot={{ r: 6 }} />}
+                  {showBatchTemp && <Line yAxisId="right" type="monotone" name={CHART_SERIES.temperature.name} dataKey="temperatura" stroke={CHART_SERIES.temperature.color} strokeWidth={2.5} strokeDasharray={CHART_SERIES.temperature.dash} dot={{ r: 3 }} activeDot={{ r: 6 }} />}
+                  <Brush dataKey="name" height={30} stroke="#2196f3" fill="#181818" travellerWidth={10} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
       )}
       {/* ========================================================= */}
       {/* SEKCJA 3D: CYFROWY BLIŹNIAK (Z Odtwarzaczem) */}
