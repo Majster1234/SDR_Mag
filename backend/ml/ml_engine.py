@@ -455,7 +455,32 @@ class MLEngine:
                 ptp_arr[i:end_idx] = ptp
                 mean_arr[i:end_idx] = mean_val
                 
-                X_test = pd.DataFrame([[mae, rmse, var, ptp, mean_val]], columns=feature_names)
+                # Modele zapisane przed dodaniem cechy ``mean`` zawierają
+                # cztery kolumny. Budujemy ramkę na podstawie metadanych
+                # konkretnego modelu, aby zachować zgodność ze starymi
+                # modelami i właściwą kolejność cech dla nowych.
+                feature_values = {
+                    "mae": mae,
+                    "rmse": rmse,
+                    "var": var,
+                    "ptp": ptp,
+                    "mean": mean_val,
+                }
+                unsupported_features = [name for name in feature_names if name not in feature_values]
+                if unsupported_features:
+                    return {
+                        "status": "error",
+                        "message": (
+                            "Model zawiera nieobsługiwane cechy: "
+                            + ", ".join(unsupported_features)
+                            + ". Wytrenuj go ponownie."
+                        ),
+                    }
+
+                X_test = pd.DataFrame(
+                    [[feature_values[name] for name in feature_names]],
+                    columns=feature_names,
+                )
                 prediction = model.predict(X_test)[0]
                 
                 if prediction == -1: 
